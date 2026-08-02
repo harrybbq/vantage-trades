@@ -103,8 +103,16 @@ async function recordOne(
  */
 export async function syncMarks(broker: BrokerAdapter): Promise<number> {
   const symbols = await inTransaction(async (tx) => {
+    // Everything held, plus everything any agent is permitted to trade.
+    //
+    // Held-only would be enough to value the book, but not to decide: a
+    // strategy needs price history for a symbol *before* it takes a position,
+    // and an agent that only accumulates history for what it already owns can
+    // never form an opinion about anything it does not.
     const result = await tx.query<{ symbol: string }>(
-      `select distinct symbol from ledger.agent_positions`,
+      `select symbol from ledger.agent_positions
+       union
+       select symbol from ledger.agent_universe`,
     );
     return result.rows.map((r) => r.symbol);
   });

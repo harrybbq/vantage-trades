@@ -16,7 +16,9 @@
     "job:reconcile": "tsx src/jobs/daily-reconcile.ts",
     "dev:api": "AUTH_MODE=insecure-local tsx scripts/dev-server.ts",
     "dev:web": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "job:agents": "tsx src/jobs/run-agents.ts",
+    "demo:agent": "tsx src/jobs/agent-demo.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

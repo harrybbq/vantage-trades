@@ -12,15 +12,15 @@ See [`CLAUDE.md`](CLAUDE.md) for the decisions behind the design and
 
 ## Status
 
-**The ledger and the control panel work against a simulated broker.** No real
-broker is connected, and no agent exists — every trade so far is hand-placed.
+**The ledger, the control panel and one agent work against a simulated
+broker.** No real broker is connected, so no real money has moved.
 
 | Step | State |
 |---|---|
 | 1. Ledger + paper broker | done against the simulator; **real broker adapter still to write** |
-| 2. One dumb agent | not started |
+| 2. One dumb agent | done — SMA crossover, with rails, benchmarked |
 | 3. Control panel | done — allocate, halt, kill, trading universe |
-| 3b. Stats UI (equity curve, benchmark) | not started |
+| 3b. Stats UI (equity curve, benchmark chart) | not started |
 | 4. Read-only endpoint + Vantage widget | not started |
 | 5. LLM agents | not started |
 
@@ -32,11 +32,12 @@ src/money.ts             integer pence, no floating point anywhere
 src/ledger/              accounts, journal, allocation, fills, lots, equity,
                          reconciliation, agent control, trading universe
 src/broker/paper.ts      simulator: spread, slippage, commission, own books
+src/agents/              strategy interface, SMA crossover, the runner
 src/pipeline/            order submission and fill sync
 src/api/, src/server/    the control-panel read model and its one handler
 netlify/functions/       the deployed API
 web/                     React 18 + Vite control panel, themed from Vantage
-tests/                   86 tests, mostly about what must not happen
+tests/                   109 tests, mostly about what must not happen
 ```
 
 ## Running it
@@ -69,6 +70,10 @@ to the owner, on every request.
 buy the same symbol, the broker shows one position, and the control panel
 still shows two different P/L figures.
 
+`npm run demo:agent` runs the dumb agent over 120 simulated days and prints
+its return next to buy-and-hold. It loses. That is the expected result and the
+reason the benchmark exists.
+
 ## The control panel
 
 Owner-only, web-only. Agent slots with capital allocation, halt, kill and the
@@ -100,3 +105,40 @@ The rules that matter are enforced by the database rather than by application
 code — see [`docs/LEDGER.md`](docs/LEDGER.md). Broker credentials are
 server-side only and must never appear in a `VITE_`-prefixed variable, which
 would bundle them into public JavaScript.
+
+## The agent
+
+`src/agents/` holds one fixed-rule strategy — a moving-average crossover, no
+model. It exists to prove the loop, the halt, the kill and the ledger under
+live-ish conditions, and it is **not** expected to make money.
+
+A strategy is a pure function from a snapshot of the world to a list of
+intentions. No database handle, no broker, no clock. It cannot place an order,
+only ask for one, and the runner decides whether that request survives:
+
+1. the agent is running (re-read immediately before each order)
+2. the tick is not too soon (a crash-loop must not become a trading loop)
+3. the daily loss cap is not breached (self-halt, not "try again")
+4. the order is within `max_order_pct`
+5. the symbol is in the universe
+
+Gates 1 and 5 are database triggers, so they hold even if the runner is wrong.
+Gates 3 and 4 live only in the runner — which is exactly why **the same limits
+must be set broker-side before any of this touches real money.** A limit this
+codebase owns is a limit a bug in this codebase can lift.
+
+**Exits are never blocked.** Not by the order-size cap, not by narrowing the
+universe. A rail that stops you closing a position preserves exposure rather
+than limiting it.
+
+## The benchmark
+
+Every reconciled day writes an equity snapshot with the index price beside it,
+from the first day, before any agent ran. The comparison is the fund against
+buy-and-hold over the same dates — not against trading by hand, and not over a
+window chosen afterwards.
+
+One caveat worth knowing: the fund figure includes unallocated cash sitting
+idle, which drags it down against a fully-invested index. That is the honest
+comparison for "should I be doing this at all", but it is not a like-for-like
+measure of the strategy itself.

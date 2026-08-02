@@ -17,6 +17,7 @@ import { inTransaction, getPool } from '../db.js';
 import { PaperBroker } from '../broker/paper.js';
 import type { BrokerAdapter } from '../broker/types.js';
 import { reconcile } from '../ledger/reconcile.js';
+import { recordSnapshots, benchmarkComparison, benchmarkSymbol } from '../ledger/snapshots.js';
 import { syncFills, syncMarks } from '../pipeline/sync.js';
 import { findOrphanedOrders } from '../pipeline/submit.js';
 
@@ -60,6 +61,36 @@ export async function runDailyReconcile(broker: BrokerAdapter): Promise<boolean>
   );
 
   console.log(result.summary);
+
+  // Snapshot after reconciling, so the equity curve is only ever built from
+  // figures that agreed with the broker. A point recorded from a diverged
+  // ledger is a point that will quietly mislead every chart drawn from it.
+  if (result.status === 'ok') {
+    const [benchmarkQuote] = await broker.getQuotes([benchmarkSymbol()]);
+    const snapshot = await inTransaction((tx) =>
+      recordSnapshots(tx, benchmarkQuote?.pricePerUnitMinor ?? null, account.asOf),
+    );
+    console.log(
+      `snapshot ${snapshot.asOf}: ${snapshot.agentsRecorded} agent(s)` +
+        (snapshot.skipped.length ? `, skipped ${snapshot.skipped.join(', ')}` : '') +
+        (snapshot.benchmarkMinor === null
+          ? `, no ${benchmarkSymbol()} price - the benchmark cannot be drawn without it`
+          : ''),
+    );
+
+    const comparison = await inTransaction((tx) => benchmarkComparison(tx));
+    if (comparison) {
+      // The number that actually matters. Beating yourself last month is not
+      // the test; beating doing nothing is.
+      console.log(
+        `since ${comparison.from}: fund ${comparison.fundReturnPct}%, ` +
+          `${comparison.benchmarkSymbol} buy-and-hold ${comparison.benchmarkReturnPct}%, ` +
+          `difference ${comparison.excessPct > 0 ? '+' : ''}${comparison.excessPct}%`,
+      );
+    }
+  } else {
+    console.log('skipping the snapshot: the ledger diverged, so today has no trustworthy point');
+  }
 
   const clean =
     result.status === 'ok' && fills.unattributable.length === 0 && orphanedOrders.length === 0;

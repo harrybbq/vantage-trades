@@ -61,10 +61,14 @@ jobs:
       - name: Build the control panel
         run: npm run build
 
-      # Runs the narrated end-to-end scenario and prints it into the log, so
-      # the system can be watched working without installing anything.
+      # Runs the narrated end-to-end scenarios and prints them into the log,
+      # so the system can be watched working without installing anything.
       - name: Demo
         run: npm run demo
+
+      # The agent over 120 simulated days, measured against buy-and-hold.
+      - name: Agent demo
+        run: npm run demo:agent
 
       # The ledger must sum to exactly zero across all accounts. Asserted here
       # as well as in the tests, because it is the one invariant whose failure

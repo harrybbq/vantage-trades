@@ -64,13 +64,19 @@ export class PaperBroker implements BrokerAdapter, FundableBroker {
     ]);
   }
 
-  async setPrice(symbol: string, priceMinor: Minor): Promise<void> {
+  /**
+   * `asOf` lets a simulation drive the quote clock. It is the timestamp the
+   * mark is stored under, so a backtest produces one bar per simulated day
+   * rather than a pile of bars all stamped with the wall-clock moment the
+   * simulation happened to run.
+   */
+  async setPrice(symbol: string, priceMinor: Minor, asOf = new Date()): Promise<void> {
     await this.tx.query(
       `insert into paper.market_prices (symbol, price_minor, updated_at)
-       values ($1, $2, now())
+       values ($1, $2, $3)
        on conflict (symbol) do update
-         set price_minor = excluded.price_minor, updated_at = now()`,
-      [symbol.toUpperCase(), priceMinor.toString()],
+         set price_minor = excluded.price_minor, updated_at = excluded.updated_at`,
+      [symbol.toUpperCase(), priceMinor.toString(), asOf],
     );
   }
 
