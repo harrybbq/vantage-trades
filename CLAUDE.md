@@ -3,6 +3,13 @@
 Owner: harrym3002@outlook.com (also owns **Vantage**, a React 18 + Vite
 SPA on Supabase + Netlify — the sibling app this one reports into).
 
+**Vantage is the mature app and the priority.** Months of work, publishing
+within months. This app is the newer sibling. Where the two interact,
+Vantage's schedule wins: nothing here may become a dependency of its
+launch, and nothing here may complicate its store review. See
+*Regulatory and store constraints* — for a shipping app that constraint
+is now live, not hypothetical.
+
 ---
 
 ## What this is
@@ -244,6 +251,13 @@ meaningful capital once the paper record justifies it.
   authorised by it. Reviewers see the whole binary regardless of
   owner-only gating. This may argue for keeping the Vantage widget
   web-only and absent from the native build — decide before building it.
+- ⚠️ **This now bears on Vantage's own launch, not just this app's.** The
+  widget is the one place brokerage data enters Vantage's binary. Adding
+  it before Vantage has shipped and cleared review puts a financial-
+  services question in front of a reviewer who would otherwise never see
+  one, on the app that matters more. **Default: build the widget web-only,
+  and not at all until Vantage is through review.** Overturn this
+  deliberately, knowing it is Vantage's timeline being risked.
 
 ---
 
