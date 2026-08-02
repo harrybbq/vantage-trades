@@ -23,7 +23,7 @@ broker.** No real broker is connected, so no real money has moved.
 | 2. One dumb agent | done — SMA crossover, with rails, benchmarked |
 | 3. Control panel | done — allocate, halt, kill, trading universe |
 | 3b. Performance view (equity curve vs benchmark) | done |
-| 4. Read-only endpoint + Vantage widget | not started |
+| 4. Read-only endpoint + Vantage widget | endpoint done; widget built in the Vantage repo |
 | 5. LLM agents | not started |
 
 ## What exists
@@ -40,7 +40,7 @@ src/pipeline/            order submission and fill sync
 src/api/, src/server/    the control-panel read model and its one handler
 netlify/functions/       the deployed API
 web/                     React 18 + Vite control panel, themed from Vantage
-tests/                   143 tests, mostly about what must not happen
+tests/                   164 tests, mostly about what must not happen
 ```
 
 ## Running it
@@ -82,9 +82,16 @@ like: twelve variants, a winner, and then the two things that are usually
 invisible — how much the winner's result is worth once you account for having
 tried twelve, and how it does on data it has never seen.
 
+## Deploying
+
+See [`docs/DEPLOY.md`](docs/DEPLOY.md). Short version: Netlify DB for the
+ledger, Vantage's Supabase for the sign-in, four environment variables, and
+the migrations applied in order.
+
 ## The control panel
 
-Owner-only, web-only. Agent slots with capital allocation, halt, kill and the
+Owner-only, web-only. Sign in with your Vantage account; the server checks
+your user id against `OWNER_USER_ID` on every request that can move money. Agent slots with capital allocation, halt, kill and the
 trading universe.
 
 **Who picks the stock:** the agent does, but only from a list you set. The

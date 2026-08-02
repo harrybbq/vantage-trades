@@ -889,3 +889,56 @@ html[data-theme='light'] {
   gap: var(--space-3);
 }
 .mini-name { font-weight: 600; font-size: var(--text-sm); }
+
+/* --- sign in ---------------------------------------------------------- */
+
+.signin-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+}
+
+.signin-card {
+  width: 100%;
+  max-width: 24rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.signin-head h1 {
+  font-family: var(--display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* --- funds bar --------------------------------------------------------- */
+
+.funds-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  box-shadow: var(--shadow-sm);
+}

@@ -7,10 +7,13 @@ import { AgentCard } from './components/AgentCard';
 import {
   AddAgentDialog,
   CapitalDialog,
+  FundsDialog,
   GlobalHaltDialog,
   KillDialog,
   UniverseDialog,
 } from './components/dialogs';
+import { SignIn } from './components/SignIn';
+import { authConfigured, currentSession, onAuthChange, signOut } from './lib/auth';
 
 type Dialog =
   | { kind: 'capital'; agent: AgentView }
@@ -18,6 +21,7 @@ type Dialog =
   | { kind: 'kill'; agent: AgentView }
   | { kind: 'globalHalt' }
   | { kind: 'addAgent' }
+  | { kind: 'funds' }
   | null;
 
 function Reconciliation({ view }: { view: ControlPanelView }) {
@@ -63,7 +67,40 @@ function Reconciliation({ view }: { view: ControlPanelView }) {
 
 type Tab = 'control' | 'stats';
 
+/**
+ * Sign-in gate.
+ *
+ * Skipped entirely when Supabase is not configured in the build, which is the
+ * local-development case — the dev API has its own explicit bypass and there
+ * is nothing to sign in to. A deployed build always has it configured, so
+ * there is no path where a deployed panel renders without a session.
+ */
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<'checking' | 'in' | 'out'>(
+    authConfigured ? 'checking' : 'in',
+  );
+
+  useEffect(() => {
+    if (!authConfigured) return;
+
+    void currentSession().then((session) => setState(session ? 'in' : 'out'));
+    return onAuthChange((session) => setState(session ? 'in' : 'out'));
+  }, []);
+
+  if (state === 'checking') return <div className="loading">Checking your session…</div>;
+  if (state === 'out') return <SignIn />;
+  return <>{children}</>;
+}
+
 export default function App() {
+  return (
+    <AuthGate>
+      <ControlPanel />
+    </AuthGate>
+  );
+}
+
+function ControlPanel() {
   const [tab, setTab] = useState<Tab>('control');
   const [view, setView] = useState<ControlPanelView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +112,24 @@ export default function App() {
       setView(await api.fetchPanel());
       setError(null);
     } catch (e) {
+      const status = e instanceof api.ApiError ? e.status : 0;
+
+      // A deployed build with no VITE_SUPABASE_* set has no sign-in screen and
+      // sends no token, so every call 401s and the panel looks broken for a
+      // reason nothing on screen explains. Name it instead.
+      if (status === 401 && !authConfigured) {
+        setError(
+          'This build has no sign-in configured, so it cannot authenticate. Set ' +
+            'VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY and redeploy — they are read at ' +
+            'build time, so changing them needs a rebuild.',
+        );
+        return;
+      }
+      if (status === 401) {
+        setError('Signed in, but this account is not the owner. Check OWNER_USER_ID.');
+        return;
+      }
+
       setError(e instanceof Error ? e.message : 'could not load the control panel');
     }
   }, []);
@@ -139,7 +194,14 @@ export default function App() {
             Owner only · identity verified server-side on every request that can move money
           </p>
         </div>
-        <Reconciliation view={view} />
+        <div className="topbar-right">
+          <Reconciliation view={view} />
+          {authConfigured && (
+            <button className="btn-sm" onClick={() => void signOut()}>
+              Sign out
+            </button>
+          )}
+        </div>
       </div>
 
       <nav className="tabs" aria-label="Sections">
@@ -175,6 +237,16 @@ export default function App() {
       ) : (
         <>
       <Overview view={view} />
+
+      <div className="funds-bar">
+        <div className="global-copy">
+          <b>Unallocated pool.</b> Capital sitting in the brokerage account that no agent may
+          deploy yet. Money enters and leaves by bank transfer; this only records that it did.
+        </div>
+        <button className="btn-sm" onClick={() => setDialog({ kind: 'funds' })} disabled={busy}>
+          Record cash in or out
+        </button>
+      </div>
 
       <div className="global-bar">
         <div className="global-copy">
@@ -254,6 +326,14 @@ export default function App() {
       )}
       {dialog?.kind === 'addAgent' && (
         <AddAgentDialog onClose={closeDialog} onDone={applyView} onError={setError} />
+      )}
+      {dialog?.kind === 'funds' && (
+        <FundsDialog
+          poolMinor={view.unallocatedMinor}
+          onClose={closeDialog}
+          onDone={applyView}
+          onError={setError}
+        />
       )}
     </div>
   );

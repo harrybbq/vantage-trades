@@ -202,6 +202,64 @@ describe('control actions', () => {
     expect((removed.body as { stillHeld: boolean }).stillHeld).toBe(true);
   });
 
+  it('records a bank transfer in, so the pool has something to allocate', async () => {
+    const result = await post({
+      action: 'recordDeposit',
+      amount: '2500.00',
+      reference: '2026-08-02 faster payment',
+    });
+
+    expect(result.status).toBe(200);
+    expect((result.body as { unallocatedMinor: string }).unallocatedMinor).toBe('250000');
+  });
+
+  it('refuses the same transfer twice rather than doubling the pool', async () => {
+    const deposit = {
+      action: 'recordDeposit',
+      amount: '2500.00',
+      reference: 'same-transfer',
+    };
+
+    expect((await post(deposit)).status).toBe(200);
+    const second = await post(deposit);
+
+    // Recording a transfer is bookkeeping. Doing it twice silently would
+    // inflate the pool and every allocation made from it.
+    expect(second.status).toBe(409);
+
+    const view = (await get()).body as { unallocatedMinor: string };
+    expect(view.unallocatedMinor).toBe('250000');
+  });
+
+  it('requires a reference, so an entry can be matched to the real transfer', async () => {
+    const result = await post({ action: 'recordDeposit', amount: '100.00', reference: '' });
+    expect(result.status).toBe(400);
+    expect((result.body as { error: string }).error).toMatch(/reference is required/);
+  });
+
+  it('records money out', async () => {
+    await post({ action: 'recordDeposit', amount: '2500.00', reference: 'in-1' });
+    const result = await post({
+      action: 'recordWithdrawal',
+      amount: '500.00',
+      reference: 'out-1',
+    });
+
+    expect((result.body as { unallocatedMinor: string }).unallocatedMinor).toBe('200000');
+  });
+
+  it('refuses to withdraw more than the pool holds', async () => {
+    await post({ action: 'recordDeposit', amount: '100.00', reference: 'small' });
+    const result = await post({
+      action: 'recordWithdrawal',
+      amount: '500.00',
+      reference: 'too-much',
+    });
+
+    expect(result.status).toBe(409);
+    expect((result.body as { error: string }).error).toMatch(/pool would go negative/);
+  });
+
   it('halts everything at once', async () => {
     await seed();
     const result = await post({ action: 'globalHalt', reason: 'kill switch' });

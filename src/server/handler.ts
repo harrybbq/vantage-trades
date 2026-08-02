@@ -143,6 +143,10 @@ export async function handle(request: ApiRequest): Promise<ApiResponse> {
       // request to authenticate and one place to add an action.
       case 'stats':
         return json(200, await inTransaction((tx) => statsView(tx)));
+      case 'recordDeposit':
+        return json(200, await actions.doRecordDeposit(body as never, actor));
+      case 'recordWithdrawal':
+        return json(200, await actions.doRecordWithdrawal(body as never, actor));
       case 'createAgent':
         return json(200, await actions.doCreateAgent(body as never, actor));
       case 'allocate':
@@ -176,7 +180,7 @@ export async function handle(request: ApiRequest): Promise<ApiResponse> {
     // read by the owner, so it is passed through rather than swallowed.
     const message = error instanceof Error ? error.message : 'request failed';
     const isDomainRefusal =
-      /not running|overdraw|pool would go negative|not permitted to trade|empty trading universe|still holds|was killed|must be unwound|does not hold enough/.test(
+      /not running|overdraw|pool would go negative|not permitted to trade|empty trading universe|still holds|was killed|must be unwound|does not hold enough|duplicate key/.test(
         message,
       );
 

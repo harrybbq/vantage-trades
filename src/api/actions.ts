@@ -13,7 +13,7 @@
 import { inTransaction } from '../db.js';
 import { formatQty, parseMoney, type Minor } from '../money.js';
 import { createAgent } from '../ledger/agents.js';
-import { allocate, deallocate } from '../ledger/allocation.js';
+import { allocate, deallocate, recordDeposit, recordWithdrawal } from '../ledger/allocation.js';
 import { halt, start, globalHalt, previewKill, standDown, type KillPreview } from '../ledger/control.js';
 import { addToUniverse, removeFromUniverse } from '../ledger/universe.js';
 import { controlPanelView, type ControlPanelView } from './view.js';
@@ -64,6 +64,52 @@ export async function doCreateAgent(
     await createAgent(tx, { id, name });
     // Deliberately no universe and no capital: a new agent must be given both
     // before it can place anything.
+    return controlPanelView(tx);
+  });
+}
+
+/**
+ * Record that real cash arrived in the brokerage account.
+ *
+ * This does not move money — it cannot. Retail broker APIs do not let software
+ * deposit or withdraw, which is a deliberate fraud boundary; the transfer
+ * happens at your bank and this tells the ledger it happened. Getting that
+ * backwards is the difference between bookkeeping and a payment system.
+ *
+ * The reference is required and unique, so recording the same transfer twice
+ * is refused rather than silently doubling the pool.
+ */
+export async function doRecordDeposit(
+  input: { amount: unknown; reference: unknown },
+  actor: string,
+): Promise<ControlPanelView> {
+  const amount = checkAmount(input.amount);
+  const reference = typeof input.reference === 'string' ? input.reference.trim() : '';
+  if (reference.length < 3) {
+    throw new ValidationError(
+      'a bank reference is required, so this entry can be matched to the real transfer later',
+    );
+  }
+
+  return inTransaction(async (tx) => {
+    await recordDeposit(tx, amount, new Date(), `deposit:${reference}`);
+    return controlPanelView(tx);
+  });
+}
+
+/** Record that real cash left the brokerage account. */
+export async function doRecordWithdrawal(
+  input: { amount: unknown; reference: unknown },
+  actor: string,
+): Promise<ControlPanelView> {
+  const amount = checkAmount(input.amount);
+  const reference = typeof input.reference === 'string' ? input.reference.trim() : '';
+  if (reference.length < 3) {
+    throw new ValidationError('a bank reference is required');
+  }
+
+  return inTransaction(async (tx) => {
+    await recordWithdrawal(tx, amount, new Date(), `withdrawal:${reference}`);
     return controlPanelView(tx);
   });
 }

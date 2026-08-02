@@ -58,7 +58,22 @@ Set these in the Netlify UI. Never in a file, never in a commit.
 | `SUPABASE_URL` | Vantage's `https://<ref>.supabase.co` |
 | `SUPABASE_ANON_KEY` | Vantage's anon key |
 | `OWNER_USER_ID` | your Supabase user UUID — the only account allowed in |
+| `VITE_SUPABASE_URL` | the same URL again, for the sign-in screen |
+| `VITE_SUPABASE_ANON_KEY` | the same anon key again, for the sign-in screen |
 | `BENCHMARK_SYMBOL` | optional, defaults to `VWRP` |
+
+**The two `VITE_` ones are deliberate and safe.** A Supabase project URL and
+its anon key are designed to be public — the anon key identifies the project
+and grants nothing on its own, and every permission decision is made
+server-side against your user token. They are the only values in this app
+allowed that prefix. The database URL, the broker credentials and the report
+token must never carry it; that prefix bundles a value into JavaScript anyone
+can read.
+
+`VITE_` values are read **at build time**, so changing them requires a
+redeploy, not just a save. A build without them has no sign-in screen at all
+and every request 401s — the panel says so explicitly rather than leaving you
+to guess.
 
 The `SUPABASE_*` variables and the database URL are read in completely
 separate places and do not have to point at the same project. Pointing auth at
@@ -86,16 +101,26 @@ JavaScript.
 
 ## 3. What "working" looks like
 
-- `https://<site>/` → the control panel loads
-- Signed out, or signed in as anyone but the owner → every request 401s, the
-  panel shows "Cannot reach the control API"
+- `https://<site>/` → a sign-in screen
+- Sign in with your Vantage account → the control panel
+- Signed in as anyone else → "this account is not the owner"
 - `https://<site>/api/report` with no token → `401 {"error":"not authorised"}`
 
-If the panel loads but everything 401s, `OWNER_USER_ID` does not match your
-Supabase user id. That is the expected failure and it fails closed.
+Then, from an empty database, the first run is:
 
-If functions return 500, check the function log: a missing or non-SSL
-`DATABASE_URL` throws with a message saying exactly that.
+1. **Record cash in** — the amber bar. This records a bank transfer you have
+   already made; it does not move money, because no broker API can.
+2. **Add an agent** — starts idle, with no capital and an empty universe, so
+   it can place nothing.
+3. **Capital** — allocate from the pool. A budget cap, not a transfer.
+4. **Universe** — the symbols it may open a position in.
+5. **Start**.
+
+Nothing will trade: no broker is connected and the agent runner is not
+scheduled. Everything else — allocation, halt, kill, the ledger — is live.
+
+If functions return 500, check the function log: a missing or non-SSL database
+URL throws with a message saying exactly that.
 
 ## 4. The report token for Vantage
 

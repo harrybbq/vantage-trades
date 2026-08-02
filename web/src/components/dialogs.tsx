@@ -305,6 +305,97 @@ export function UniverseDialog({
 }
 
 /* -------------------------------------------------------------------------
+   Funds
+
+   Recording a bank transfer, not making one. Retail broker APIs cannot move
+   cash — that is a deliberate fraud boundary — so the money arrives at your
+   bank and this tells the ledger it did. The wording has to make that
+   unmistakable, or the first mistake is someone expecting a transfer to
+   happen because they typed a number here.
+   ------------------------------------------------------------------------- */
+
+export function FundsDialog({
+  poolMinor,
+  onClose,
+  onDone,
+  onError,
+}: Common & { poolMinor: string }) {
+  const [amount, setAmount] = useState('1000.00');
+  const [reference, setReference] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const run = async (direction: 'in' | 'out') => {
+    setBusy(true);
+    try {
+      const view =
+        direction === 'in'
+          ? await api.recordDeposit(amount.trim(), reference.trim())
+          : await api.recordWithdrawal(amount.trim(), reference.trim());
+      onDone(view);
+      onClose();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'could not record that');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      kicker="Bank transfer"
+      title="Record cash in or out"
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button onClick={() => void run('out')} disabled={busy || !reference.trim()}>
+            Record money out
+          </button>
+          <button
+            className="btn-primary"
+            onClick={() => void run('in')}
+            disabled={busy || !reference.trim()}
+          >
+            Record money in
+          </button>
+        </>
+      }
+    >
+      <p>
+        This <strong>records</strong> a transfer you have already made at your bank. It does not
+        move any money — no broker API can, which is deliberate.
+      </p>
+      <label className="field">
+        <span className="label">Amount (£)</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="1000.00"
+        />
+      </label>
+      <label className="field">
+        <span className="label">Bank reference</span>
+        <input
+          type="text"
+          value={reference}
+          onChange={(e) => setReference(e.target.value)}
+          placeholder="e.g. 2026-08-02 faster payment"
+          autoComplete="off"
+        />
+      </label>
+      <p className="hint">
+        The reference is required and must be unique — recording the same transfer twice is
+        refused rather than silently doubling the pool. Unallocated pool is currently{' '}
+        <span className="num">{formatGBP(poolMinor)}</span>.
+      </p>
+    </Modal>
+  );
+}
+
+/* -------------------------------------------------------------------------
    Global halt
    ------------------------------------------------------------------------- */
 

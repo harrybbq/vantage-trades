@@ -82,6 +82,8 @@ export interface KillPreview {
   summary: string;
 }
 
+import { accessToken } from './auth';
+
 const BASE = import.meta.env['VITE_API_URL'] ?? '/api/control';
 
 /**
@@ -100,11 +102,20 @@ export class ApiError extends Error {
 }
 
 async function request<T>(init?: RequestInit): Promise<T> {
+  // Read the token per request. The client refreshes in the background, and a
+  // cached token goes stale mid-session and produces a 401 that looks like a
+  // permissions problem rather than an expiry.
+  const token = await accessToken();
+
   let response: Response;
   try {
     response = await fetch(BASE, {
       ...init,
-      headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers ?? {}),
+      },
     });
   } catch {
     throw new ApiError('Could not reach the control API. Is the server running?', 0);
@@ -129,6 +140,12 @@ const post = <T>(body: Record<string, unknown>): Promise<T> =>
 
 export const createAgent = (id: string, name: string) =>
   post<ControlPanelView>({ action: 'createAgent', id, name });
+
+export const recordDeposit = (amount: string, reference: string) =>
+  post<ControlPanelView>({ action: 'recordDeposit', amount, reference });
+
+export const recordWithdrawal = (amount: string, reference: string) =>
+  post<ControlPanelView>({ action: 'recordWithdrawal', amount, reference });
 
 export const allocate = (agentId: string, amount: string) =>
   post<ControlPanelView>({ action: 'allocate', agentId, amount });
