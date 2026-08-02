@@ -69,6 +69,26 @@ describe('authentication', () => {
     expect(result.status).toBe(500);
     delete process.env['NODE_ENV'];
   });
+
+  it('refuses the local bypass on a hosted platform, whatever NODE_ENV says', async () => {
+    // The natural reaction to a deployed panel returning 401 is to try
+    // AUTH_MODE=insecure-local. Netlify does not reliably set NODE_ENV at
+    // function runtime, so that alone would have put halt, kill and allocate
+    // on the public internet.
+    for (const marker of ['NETLIFY', 'AWS_LAMBDA_FUNCTION_NAME', 'LAMBDA_TASK_ROOT', 'VERCEL']) {
+      process.env[marker] = 'true';
+
+      const result = await handle({ method: 'GET', path: '/', headers: AUTHED, body: null });
+      expect(result.status).toBe(500);
+      expect((result.body as { error: string }).error).toMatch(/must never be set on a deployed site/);
+
+      delete process.env[marker];
+    }
+
+    // And with no marker present it still works locally.
+    const local = await handle({ method: 'GET', path: '/', headers: AUTHED, body: null });
+    expect(local.status).toBe(200);
+  });
 });
 
 describe('every response can be serialised', () => {

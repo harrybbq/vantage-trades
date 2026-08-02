@@ -3,6 +3,11 @@
   publish = "dist/web"
   functions = "netlify/functions"
 
+[build.environment]
+  # Pinned: the functions use Node 20+ APIs and an older default would fail at
+  # runtime rather than at build time, which is the worse place to find out.
+  NODE_VERSION = "22"
+
 [functions]
   node_bundler = "esbuild"
 
@@ -29,8 +34,10 @@
     # Owner-only data. No shared cache may hold a copy.
     Cache-Control = "no-store"
 
-# Environment variables are set in the Netlify UI, never committed:
-#   DATABASE_URL          the ledger (Supabase, EU region)
+# Environment variables are set in the Netlify UI, never committed. See
+# docs/DEPLOY.md for the order to do this in.
+#
+#   DATABASE_URL          Supabase pooler URI, EU region, ?sslmode=require
 #   SUPABASE_URL          for verifying the caller's token
 #   SUPABASE_ANON_KEY     for verifying the caller's token
 #   OWNER_USER_ID         the only user allowed through
@@ -39,3 +46,7 @@
 #
 # Anything prefixed VITE_ is bundled into public JavaScript. No secret may
 # ever carry that prefix.
+#
+# NEVER set AUTH_MODE here. It is a local development bypass that skips the
+# owner check entirely; the handler now refuses to start with it on a hosted
+# platform, but it should not be reachable in the first place.

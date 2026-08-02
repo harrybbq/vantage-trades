@@ -58,13 +58,34 @@ export async function authenticate(
   const supabaseUrl = process.env['SUPABASE_URL'];
   const ownerId = process.env['OWNER_USER_ID'];
 
-  // Local development only, and it has to be asked for explicitly. Checked
-  // before anything else so a misconfigured production deploy cannot fall into
-  // it by accident: without SUPABASE_URL set, the request is refused below
-  // rather than allowed through.
+  // Local development only, and it has to be asked for explicitly.
+  //
+  // The guard used to be NODE_ENV !== 'production', which is not good enough:
+  // Netlify does not reliably set NODE_ENV at function runtime, so the bypass
+  // could have fired on a deployed site. Since the natural reaction to a
+  // deployed panel returning 401 is to try AUTH_MODE=insecure-local, that was
+  // a live path to putting halt, kill and allocate on the public internet.
+  //
+  // So this now refuses whenever it can detect a hosted environment at all,
+  // and fails closed rather than open.
   if (process.env['AUTH_MODE'] === 'insecure-local') {
-    if (process.env['NODE_ENV'] === 'production') {
-      throw new Error('AUTH_MODE=insecure-local must never be set in production');
+    const hostedMarkers = [
+      'NETLIFY',
+      'AWS_LAMBDA_FUNCTION_NAME',
+      'LAMBDA_TASK_ROOT',
+      'AWS_EXECUTION_ENV',
+      'VERCEL',
+      'FLY_APP_NAME',
+      'K_SERVICE',
+    ];
+    const hosted = hostedMarkers.find((key) => process.env[key]);
+
+    if (hosted || process.env['NODE_ENV'] === 'production') {
+      throw new Error(
+        `AUTH_MODE=insecure-local is a local development bypass and must never be set ` +
+          `on a deployed site (detected ${hosted ?? 'NODE_ENV=production'}). ` +
+          `Set SUPABASE_URL, SUPABASE_ANON_KEY and OWNER_USER_ID instead.`,
+      );
     }
     return 'local-owner';
   }

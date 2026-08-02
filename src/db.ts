@@ -20,13 +20,43 @@ export type Sql = pg.PoolClient | pg.Pool;
 
 let pool: pg.Pool | undefined;
 
+const isLocal = (url: string): boolean => /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url);
+
+/** Serverless runtimes give each invocation its own process. */
+const isServerless = (): boolean =>
+  Boolean(
+    process.env['NETLIFY'] ??
+      process.env['AWS_LAMBDA_FUNCTION_NAME'] ??
+      process.env['LAMBDA_TASK_ROOT'],
+  );
+
 export function getPool(): pg.Pool {
   if (!pool) {
     const connectionString = process.env['DATABASE_URL'];
     if (!connectionString) {
       throw new Error('DATABASE_URL is not set');
     }
-    pool = new pg.Pool({ connectionString, max: 8 });
+
+    // A ledger connection must not cross the internet in plaintext. Anything
+    // that is not loopback has to declare SSL, and rather than quietly adding
+    // it, this refuses — silently "fixing" a connection string is how you end
+    // up unsure whether a given deploy was encrypted.
+    if (!isLocal(connectionString) && !/sslmode=(require|verify-ca|verify-full)/.test(connectionString)) {
+      throw new Error(
+        'a remote DATABASE_URL must specify sslmode=require (or stronger). ' +
+          'For Supabase, use the connection pooler URI and append ?sslmode=require',
+      );
+    }
+
+    pool = new pg.Pool({
+      connectionString,
+      // One connection per invocation in serverless: each cold start gets its
+      // own process, so a large pool multiplies by the number of concurrent
+      // invocations and exhausts the database's connection limit.
+      max: isServerless() ? 1 : 8,
+      idleTimeoutMillis: isServerless() ? 1_000 : 10_000,
+      connectionTimeoutMillis: 10_000,
+    });
   }
   return pool;
 }
