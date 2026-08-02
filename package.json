@@ -19,7 +19,10 @@
     "build": "vite build",
     "job:agents": "tsx src/jobs/run-agents.ts",
     "demo:agent": "tsx src/jobs/agent-demo.ts",
-    "demo:research": "tsx src/jobs/research-demo.ts"
+    "demo:research": "tsx src/jobs/research-demo.ts",
+    "token:mint": "tsx src/jobs/report-token.ts mint",
+    "token:list": "tsx src/jobs/report-token.ts list",
+    "token:revoke": "tsx src/jobs/report-token.ts revoke"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

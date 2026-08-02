@@ -126,25 +126,39 @@ pushes, and Vantage cannot place orders.
 
 Endpoint returns roughly:
 
+`GET /api/report`, header `X-Vantage-Token`. Built; this is a real response:
+
 ```json
 {
-  "asOf": "2026-08-01T12:00:00Z",
-  "totalEquity": 5230.11,
-  "unallocated": 1087.09,
+  "asOf": "2026-08-02T18:32:01.426Z",
+  "currency": "GBP",
+  "totalEquityMinor": "518742",
+  "unallocatedMinor": "150000",
   "agents": [
     {
       "id": "momentum-1",
       "name": "Momentum",
-      "status": "running",
-      "allocated": 2000.00,
-      "equity": 2143.02,
-      "pnlPctSinceStart": 7.15,
-      "pnlPctToday": -0.42,
-      "holdings": [{ "symbol": "AAPL", "qty": 4 }]
+      "status": "halted",
+      "allocatedMinor": "200000",
+      "equityMinor": "203872",
+      "pnlPctSinceStart": 1.93,
+      "pnlPctToday": null,
+      "holdings": [{ "symbol": "AAPL", "qty": "4.00000000" }]
     }
-  ]
+  ],
+  "reconciliation": { "status": "ok", "asOf": "2026-08-02T18:31:48.926Z" }
 }
 ```
+
+**Money is integer minor units as strings, not JSON numbers.** This earlier
+sketched `"equity": 2143.02`; that was wrong. A JSON number is an IEEE 754
+double and 2143.02 is not exactly representable in one — holding the ledger in
+integers all the way through Postgres achieves nothing if the last hop is a
+float. The widget formats pence and never does arithmetic on them.
+
+Percentages *are* numbers: they are already derived, already rounded, and
+display-only. `null` means genuinely unknown (no mark, or no prior close) and
+must not be rendered as zero.
 
 Widget renders one bar per agent: total fund, P/L % since start and
 today, and current holdings.
