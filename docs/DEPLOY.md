@@ -26,15 +26,45 @@ Nothing else on this list matters until the site actually builds.
 Any Postgres. The ledger *is* the app, so this is not optional — but it does
 not have to be Supabase.
 
-**Netlify DB is the least work.** Add it from the site's dashboard and it
-provisions a Neon Postgres and injects `NETLIFY_DATABASE_URL` automatically.
-`getPool()` falls back to that variable, so there is nothing to copy across
-and nothing to go stale when the database is re-provisioned. Its URL already
-includes `sslmode=require`.
+There are two reasonable choices.
 
-Keeping the ledger out of Vantage's database is deliberate: the migrations
-here create their own schemas and would not collide, but separate databases
-mean nothing in this app can ever damage Vantage's data.
+### Option A — Netlify DB (least work)
+
+Add it from the site's dashboard. It provisions a Neon Postgres and injects
+`NETLIFY_DATABASE_URL` automatically; `getPool()` falls back to that variable,
+so there is nothing to copy across and nothing to go stale when the database
+is re-provisioned. Its URL already includes `sslmode=require`.
+
+### Option B — inside Vantage's existing Supabase database
+
+Also fine, and better isolated than it sounds. The ledger lives entirely in
+three schemas of its own — `ledger`, `paper`, `research`. It creates no
+extensions, no roles, no grants, never changes `search_path`, and never
+references `public`. Every one of its tables has row-level security enabled
+**and forced** with no policies, so even a leaked anon key reads nothing.
+
+Verified rather than assumed: all eight migrations applied into a database
+that already held other tables, then the full test suite ran against it, and
+the other tables and their rows were untouched.
+
+Run [`supabase/preflight.sql`](../supabase/preflight.sql) in the SQL editor
+first. It changes nothing and tells you whether the three schema names are
+free and whether the Postgres version is new enough.
+
+Two costs you are accepting by sharing:
+
+- **Blast radius.** A wrong `drop schema` in the SQL editor now has Vantage's
+  data in the same window. Nothing in the code can cause this; a tired evening
+  can.
+- **Restore is coupled.** You cannot point-in-time restore the ledger without
+  rewinding Vantage too. In practice the ledger is append-only and corrected
+  with reversing entries rather than restores, so this is smaller than it
+  first appears — but it is real, and it is the reason to prefer Option A if
+  you have no preference.
+
+Also check *Supabase → Settings → API → Exposed schemas* lists only `public`
+(and `graphql_public`). The ledger's schemas must not be added there. Forced
+RLS would still deny everything, but two layers beats one.
 
 Apply the migrations in `supabase/migrations/` **in numerical order**, 0001
 through 0008 — they are not idempotent and each depends on the last. Use the
