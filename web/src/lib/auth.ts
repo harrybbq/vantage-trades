@@ -18,8 +18,18 @@
 
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 
-const url = import.meta.env['VITE_SUPABASE_URL'] as string | undefined;
-const anonKey = import.meta.env['VITE_SUPABASE_ANON_KEY'] as string | undefined;
+/**
+ * Trimmed, and the URL's trailing slash removed.
+ *
+ * Both are classic silent failures: an environment variable pasted with a
+ * trailing newline produces "Invalid API key" with nothing on screen to
+ * suggest whitespace, and `https://x.supabase.co/` builds request URLs with a
+ * double slash.
+ */
+const clean = (value: string | undefined): string | undefined => value?.trim() || undefined;
+
+const url = clean(import.meta.env['VITE_SUPABASE_URL'] as string | undefined)?.replace(/\/+$/, '');
+const anonKey = clean(import.meta.env['VITE_SUPABASE_ANON_KEY'] as string | undefined);
 
 /**
  * Auth is configured only when both are present.
@@ -57,7 +67,20 @@ export function onAuthChange(handler: (session: Session | null) => void): () => 
 
 export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await supabase().auth.signInWithPassword({ email, password });
-  if (error) throw new Error(error.message);
+  if (!error) return;
+
+  // "Invalid API key" is a configuration problem, not a wrong password, and
+  // saying so saves an hour of retyping credentials that were always correct.
+  if (/invalid api key/i.test(error.message)) {
+    throw new Error(
+      'Invalid API key — the sign-in key does not match the project. Check ' +
+        'VITE_SUPABASE_ANON_KEY is the anon/publishable key for ' +
+        `${url ?? 'this project'}, with no stray whitespace, then redeploy ` +
+        '(it is read at build time).',
+    );
+  }
+
+  throw new Error(error.message);
 }
 
 export async function signOut(): Promise<void> {

@@ -55,8 +55,10 @@ export function serialise(body: unknown): string {
 export async function authenticate(
   headers: Record<string, string | undefined>,
 ): Promise<string | null> {
-  const supabaseUrl = process.env['SUPABASE_URL'];
-  const ownerId = process.env['OWNER_USER_ID'];
+  // Trimmed for the same reason as the client: an env var pasted with a
+  // trailing newline fails in a way nothing on screen explains.
+  const supabaseUrl = process.env['SUPABASE_URL']?.trim().replace(/\/+$/, '');
+  const ownerId = process.env['OWNER_USER_ID']?.trim();
 
   // Local development only, and it has to be asked for explicitly.
   //
@@ -96,13 +98,24 @@ export async function authenticate(
   if (!header?.startsWith('Bearer ')) return null;
   const token = header.slice('Bearer '.length);
 
-  const anonKey = process.env['SUPABASE_ANON_KEY'];
+  const anonKey = process.env['SUPABASE_ANON_KEY']?.trim();
   if (!anonKey) return null;
 
   const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
     headers: { Authorization: `Bearer ${token}`, apikey: anonKey },
   });
-  if (!response.ok) return null;
+
+  if (!response.ok) {
+    // The caller still gets a bland 401 — telling them which half failed is
+    // free reconnaissance. But the reason belongs in the function log, or a
+    // misconfigured key is indistinguishable from a wrong user and the owner
+    // has nothing to debug with.
+    const detail = await response.text().catch(() => '');
+    console.error(
+      `Supabase rejected the token check: ${response.status} ${detail.slice(0, 200)}`,
+    );
+    return null;
+  }
 
   const user = (await response.json()) as { id?: string };
   if (!user.id || user.id !== ownerId) return null;
