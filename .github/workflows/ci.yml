@@ -1,0 +1,80 @@
+name: CI
+
+# Runs the full suite against a real Postgres on every push.
+#
+# The point is that nothing here needs a local machine. The safety properties
+# are database constraints, so they are tested against a real database rather
+# than a mock, and the result is a green or red tick readable in a browser.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vantage_trades
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/vantage_trades
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Apply migrations
+        run: |
+          for migration in supabase/migrations/*.sql; do
+            echo "applying $(basename "$migration")"
+            psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -f "$migration"
+          done
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Runs the narrated end-to-end scenario and prints it into the log, so
+      # the system can be watched working without installing anything.
+      - name: Demo
+        run: npm run demo
+
+      # The ledger must sum to exactly zero across all accounts. Asserted here
+      # as well as in the tests, because it is the one invariant whose failure
+      # means every number downstream is fiction.
+      - name: Assert the ledger balances
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare v_total bigint;
+            begin
+              select coalesce(sum(amount_minor), 0) into v_total from ledger.postings;
+              if v_total <> 0 then
+                raise exception 'ledger does not balance: postings sum to %', v_total;
+              end if;
+              raise notice 'ledger balances';
+            end \$\$;
+          "
