@@ -18,6 +18,7 @@ import { formatGBP, formatQty, parseMoney, parseQty } from '../money.js';
 import { createAgent } from '../ledger/agents.js';
 import { recordDeposit, allocate } from '../ledger/allocation.js';
 import { start, halt, previewKill } from '../ledger/control.js';
+import { addToUniverse } from '../ledger/universe.js';
 import { agentEquity, unallocatedPool } from '../ledger/equity.js';
 import { submitOrder } from '../pipeline/submit.js';
 import { syncFills, syncMarks } from '../pipeline/sync.js';
@@ -94,14 +95,21 @@ async function main(): Promise<void> {
 
   heading('2. CREATE TWO AGENTS AND ALLOCATE CAPITAL');
   await inTransaction(async (tx) => {
-    for (const [id, name, amount] of [
-      ['momentum-1', 'Momentum', '2000.00'],
-      ['value-1', 'Value', '1500.00'],
+    for (const [id, name, amount, universe] of [
+      ['momentum-1', 'Momentum', '2000.00', ['AAPL', 'MSFT', 'NVDA']],
+      ['value-1', 'Value', '1500.00', ['AAPL', 'ULVR', 'SHEL']],
     ] as const) {
       await createAgent(tx, { id, name });
+      // A new agent can buy nothing until it is given a universe. The owner
+      // decides what it may touch; the agent decides when and how much.
+      for (const symbol of universe) {
+        await addToUniverse(tx, id, symbol, 'owner');
+      }
       await allocate(tx, id, parseMoney(amount));
       await start(tx, id, 'owner');
-      console.log(`${id}: allocated ${formatGBP(parseMoney(amount))}, started`);
+      console.log(
+        `${id}: allocated ${formatGBP(parseMoney(amount))}, may trade ${universe.join(', ')}, started`,
+      );
     }
   });
   console.log('allocation moved no real money - it is a budget cap, not a transfer');

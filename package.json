@@ -8,21 +8,30 @@
     "node": ">=20"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:reset": "./scripts/db-reset.sh",
     "demo": "tsx src/jobs/demo.ts",
-    "job:reconcile": "tsx src/jobs/daily-reconcile.ts"
+    "job:reconcile": "tsx src/jobs/daily-reconcile.ts",
+    "dev:api": "AUTH_MODE=insecure-local tsx scripts/dev-server.ts",
+    "dev:web": "vite",
+    "build": "vite build"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "vite": "^5.4.21",
     "vitest": "^2.1.8"
   },
   "dependencies": {
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   }
 }

@@ -10,14 +10,13 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { inTransaction, closePool, getPool } from '../src/db.js';
 import { parseMoney, parseQty, formatGBP } from '../src/money.js';
 import { PaperBroker, DEFAULT_COSTS } from '../src/broker/paper.js';
-import { createAgent } from '../src/ledger/agents.js';
 import { recordDeposit, allocate } from '../src/ledger/allocation.js';
 import { halt, start } from '../src/ledger/control.js';
 import { agentEquity } from '../src/ledger/equity.js';
 import { submitOrder, findOrphanedOrders } from '../src/pipeline/submit.js';
 import { syncFills, syncMarks } from '../src/pipeline/sync.js';
 import { runDailyReconcile } from '../src/jobs/daily-reconcile.js';
-import { resetData } from './helpers.js';
+import { resetData, newAgent } from './helpers.js';
 
 async function resetPaper(): Promise<void> {
   await getPool().query(`
@@ -55,7 +54,7 @@ describe('a hand-placed trade, end to end', () => {
     await fundBoth('5000.00');
 
     await inTransaction(async (tx) => {
-      await createAgent(tx, { id: 'momentum-1', name: 'Momentum' });
+      await newAgent(tx, 'momentum-1', 'Momentum');
       await allocate(tx, 'momentum-1', parseMoney('2000.00'));
       await start(tx, 'momentum-1', 'owner');
     });
@@ -93,7 +92,7 @@ describe('a hand-placed trade, end to end', () => {
 
     await inTransaction(async (tx) => {
       for (const id of ['momentum-1', 'value-1']) {
-        await createAgent(tx, { id, name: id });
+        await newAgent(tx, id);
         await allocate(tx, id, parseMoney('2000.00'));
         await start(tx, id, 'owner');
       }
@@ -148,7 +147,7 @@ describe('a hand-placed trade, end to end', () => {
   it('still reconciles after a partial sell', async () => {
     await fundBoth('5000.00');
     await inTransaction(async (tx) => {
-      await createAgent(tx, { id: 'momentum-1', name: 'Momentum' });
+      await newAgent(tx, 'momentum-1', 'Momentum');
       await allocate(tx, 'momentum-1', parseMoney('2000.00'));
       await start(tx, 'momentum-1', 'owner');
     });
@@ -277,7 +276,7 @@ describe('the submission path', () => {
   it('will not place an order for a halted agent', async () => {
     await fundBoth('1000.00');
     await inTransaction(async (tx) => {
-      await createAgent(tx, { id: 'momentum-1', name: 'Momentum' });
+      await newAgent(tx, 'momentum-1', 'Momentum');
       await allocate(tx, 'momentum-1', parseMoney('500.00'));
       await start(tx, 'momentum-1', 'owner');
       await halt(tx, 'momentum-1', 'owner', 'stop');
@@ -327,7 +326,7 @@ describe('the submission path', () => {
   it('leaves no orphaned orders on the happy path', async () => {
     await fundBoth('2000.00');
     await inTransaction(async (tx) => {
-      await createAgent(tx, { id: 'momentum-1', name: 'Momentum' });
+      await newAgent(tx, 'momentum-1', 'Momentum');
       await allocate(tx, 'momentum-1', parseMoney('1000.00'));
       await start(tx, 'momentum-1', 'owner');
     });
@@ -349,7 +348,7 @@ describe('reconciliation catches real divergence', () => {
   it('notices when the broker holds something the ledger does not', async () => {
     await fundBoth('5000.00');
     await inTransaction(async (tx) => {
-      await createAgent(tx, { id: 'momentum-1', name: 'Momentum' });
+      await newAgent(tx, 'momentum-1', 'Momentum');
       await allocate(tx, 'momentum-1', parseMoney('2000.00'));
       await start(tx, 'momentum-1', 'owner');
     });
@@ -400,7 +399,7 @@ describe('fractional shares across two agents', () => {
     await fundBoth('5000.00');
     await inTransaction(async (tx) => {
       for (const id of ['a-1', 'b-2']) {
-        await createAgent(tx, { id, name: id });
+        await newAgent(tx, id);
         await allocate(tx, id, parseMoney('2000.00'));
         await start(tx, id, 'owner');
       }

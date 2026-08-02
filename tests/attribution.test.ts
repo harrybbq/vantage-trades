@@ -9,12 +9,11 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { inTransaction, closePool, getPool } from '../src/db.js';
 import { parseMoney, parseQty, formatMoney } from '../src/money.js';
-import { createAgent } from '../src/ledger/agents.js';
 import { recordDeposit, allocate } from '../src/ledger/allocation.js';
 import { start } from '../src/ledger/control.js';
 import { agentEquity, unallocatedPool } from '../src/ledger/equity.js';
 import { reconcile } from '../src/ledger/reconcile.js';
-import { resetData, fundedAgent, trade, setMark } from './helpers.js';
+import { resetData, fundedAgent, newAgent, trade, setMark } from './helpers.js';
 
 beforeEach(resetData);
 afterAll(closePool);
@@ -23,7 +22,7 @@ async function twoAgents(): Promise<void> {
   await inTransaction(async (tx) => {
     await recordDeposit(tx, parseMoney('5000.00'), new Date(), 'dep-two-agents');
     for (const id of ['momentum-1', 'value-1']) {
-      await createAgent(tx, { id, name: id });
+      await newAgent(tx, id);
       await allocate(tx, id, parseMoney('2000.00'));
       await start(tx, id, 'test');
     }

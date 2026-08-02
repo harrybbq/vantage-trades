@@ -8,14 +8,13 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { inTransaction, closePool, getPool } from '../src/db.js';
 import { parseMoney, parseQty } from '../src/money.js';
-import { createAgent } from '../src/ledger/agents.js';
 import { accountId } from '../src/ledger/accounts.js';
 import { postEntry } from '../src/ledger/journal.js';
 import { allocate, recordDeposit } from '../src/ledger/allocation.js';
 import { halt, start, globalHalt, standDown, previewKill } from '../src/ledger/control.js';
 import { createOrder, AgentNotRunningError } from '../src/ledger/orders.js';
 import { recordFill } from '../src/ledger/fills.js';
-import { resetData, fundedAgent, trade } from './helpers.js';
+import { resetData, fundedAgent, newAgent, trade } from './helpers.js';
 
 beforeEach(resetData);
 afterAll(closePool);
@@ -41,7 +40,7 @@ describe('halt is authoritative, not advisory', () => {
   });
 
   it('refuses an order from an agent that was never started', async () => {
-    await inTransaction((tx) => createAgent(tx, { id: 'idle-1', name: 'Idle' }));
+    await inTransaction((tx) => newAgent(tx, 'idle-1', 'Idle'));
 
     await expect(
       inTransaction((tx) =>
@@ -81,7 +80,7 @@ describe('halt is authoritative, not advisory', () => {
     await inTransaction(async (tx) => {
       await recordDeposit(tx, parseMoney('3000.00'), new Date(), 'dep-global');
       for (const id of ['a-1', 'b-2', 'c-3']) {
-        await createAgent(tx, { id, name: id });
+        await newAgent(tx, id);
         await allocate(tx, id, parseMoney('1000.00'));
         await start(tx, id, 'test');
       }
@@ -147,7 +146,7 @@ describe('every order is attributed to an agent', () => {
     await inTransaction(async (tx) => {
       await recordDeposit(tx, parseMoney('2000.00'), new Date(), 'dep-attr');
       for (const id of ['agent-a', 'agent-b']) {
-        await createAgent(tx, { id, name: id });
+        await newAgent(tx, id);
         await allocate(tx, id, parseMoney('1000.00'));
         await start(tx, id, 'test');
       }
@@ -241,7 +240,7 @@ describe('an agent cannot deploy capital it was never allocated', () => {
 
   it('refuses to allocate more than the pool holds', async () => {
     await inTransaction(async (tx) => {
-      await createAgent(tx, { id: 'momentum-1', name: 'Momentum' });
+      await newAgent(tx, 'momentum-1', 'Momentum');
       await recordDeposit(tx, parseMoney('100.00'), new Date(), 'dep-small');
     });
 
@@ -282,7 +281,7 @@ describe('an agent cannot deploy capital it was never allocated', () => {
 
 describe('the journal cannot be corrupted', () => {
   it('rejects an entry that does not balance', async () => {
-    await inTransaction((tx) => createAgent(tx, { id: 'momentum-1', name: 'M' }));
+    await inTransaction((tx) => newAgent(tx, 'momentum-1', 'M'));
 
     // Bypass postEntry's own check to prove the database is the real guard.
     await expect(

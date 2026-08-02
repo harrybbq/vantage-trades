@@ -1,0 +1,41 @@
+[build]
+  command = "npm run build"
+  publish = "dist/web"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# The SPA is one page; every path that is not the API or a built asset should
+# serve it rather than 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # This is a control surface for a brokerage account. It should never be
+    # framed, sniffed, or handed to a referrer.
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    # Owner-only data. No shared cache may hold a copy.
+    Cache-Control = "no-store"
+
+# Environment variables are set in the Netlify UI, never committed:
+#   DATABASE_URL          the ledger (Supabase, EU region)
+#   SUPABASE_URL          for verifying the caller's token
+#   SUPABASE_ANON_KEY     for verifying the caller's token
+#   OWNER_USER_ID         the only user allowed through
+#   BROKER_API_KEY        server-side only, never VITE_-prefixed
+#   BROKER_API_SECRET     server-side only, never VITE_-prefixed
+#
+# Anything prefixed VITE_ is bundled into public JavaScript. No secret may
+# ever carry that prefix.

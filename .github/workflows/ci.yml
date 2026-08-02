@@ -57,6 +57,10 @@ jobs:
       - name: Test
         run: npm test
 
+      # Catches anything that typechecks but will not bundle.
+      - name: Build the control panel
+        run: npm run build
+
       # Runs the narrated end-to-end scenario and prints it into the log, so
       # the system can be watched working without installing anything.
       - name: Demo

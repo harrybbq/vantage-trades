@@ -1,6 +1,7 @@
 import { getPool } from '../src/db.js';
 import { parseMoney, parseQty } from '../src/money.js';
 import { createAgent } from '../src/ledger/agents.js';
+import { addToUniverse } from '../src/ledger/universe.js';
 import { recordDeposit, allocate } from '../src/ledger/allocation.js';
 import { start } from '../src/ledger/control.js';
 import { createOrder } from '../src/ledger/orders.js';
@@ -31,13 +32,33 @@ export async function resetData(): Promise<void> {
 
 let fillCounter = 0;
 
-/** Create an agent, fund the pool, allocate to it, and start it. */
+/** Symbols most tests trade. A new agent can buy nothing until it has these. */
+export const TEST_UNIVERSE = ['AAPL', 'MSFT', 'TSLA'];
+
+/** Create an agent with a universe. Bare `createAgent` leaves it unable to buy. */
+export async function newAgent(
+  tx: Sql,
+  id: string,
+  name = id,
+  universe: readonly string[] = TEST_UNIVERSE,
+): Promise<void> {
+  await createAgent(tx, { id, name });
+  for (const symbol of universe) {
+    await addToUniverse(tx, id, symbol, 'test');
+  }
+}
+
+/** Create an agent, give it a universe, fund the pool, allocate, and start. */
 export async function fundedAgent(
   tx: Sql,
   agentId: string,
   amount: string,
+  universe: readonly string[] = TEST_UNIVERSE,
 ): Promise<void> {
   await createAgent(tx, { id: agentId, name: agentId });
+  for (const symbol of universe) {
+    await addToUniverse(tx, agentId, symbol, 'test');
+  }
   await recordDeposit(tx, parseMoney(amount), new Date(), `deposit:${agentId}:${fillCounter++}`);
   await allocate(tx, agentId, parseMoney(amount));
   await start(tx, agentId, 'test');
