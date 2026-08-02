@@ -66,16 +66,35 @@ Also check *Supabase → Settings → API → Exposed schemas* lists only `publi
 (and `graphql_public`). The ledger's schemas must not be added there. Forced
 RLS would still deny everything, but two layers beats one.
 
-Apply the migrations in `supabase/migrations/` **in numerical order**, 0001
-through 0008 — they are not idempotent and each depends on the last. Use the
-SQL editor in the Neon console behind your Netlify DB (or `supabase db push`
-if you did choose Supabase).
+### Applying it
 
-Then confirm it took:
+Paste [`supabase/install.sql`](../supabase/install.sql) into the SQL editor
+and run it once. It is every migration in order inside **one transaction**, so
+if anything fails the whole thing rolls back and the database is left exactly
+as it was — there is no half-applied state to unpick. Verified by deliberately
+breaking it mid-install: zero ledger objects survived, and the other app's
+tables were untouched.
+
+It is generated from `supabase/migrations/` by
+`scripts/build-install-sql.sh`, so it cannot drift from them. If you prefer,
+applying the eight migration files by hand in numerical order does the same
+thing — they are not idempotent and each depends on the last.
+
+Expect:
+
+```
+ledger    13 tables
+paper      5
+research   2
+```
+
+Confirm with:
 
 ```sql
-select count(*) from ledger.agents;          -- 0, not an error
-select count(*) from research.experiments;   -- 0, not an error
+select table_schema, count(*)
+  from information_schema.tables
+ where table_schema in ('ledger','paper','research') and table_type = 'BASE TABLE'
+ group by table_schema order by table_schema;
 ```
 
 ## 2. Environment variables
@@ -84,7 +103,7 @@ Set these in the Netlify UI. Never in a file, never in a commit.
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | **not needed with Netlify DB** — it injects `NETLIFY_DATABASE_URL` |
+| `DATABASE_URL` | Vantage's **transaction pooler** URI + `?sslmode=require`. Omit entirely if using Netlify DB, which injects `NETLIFY_DATABASE_URL` |
 | `SUPABASE_URL` | Vantage's `https://<ref>.supabase.co` |
 | `SUPABASE_ANON_KEY` | Vantage's anon key |
 | `OWNER_USER_ID` | your Supabase user UUID — the only account allowed in |
@@ -112,10 +131,12 @@ already exists, while the ledger lives somewhere Vantage cannot be affected by.
 
 Two things that will bite:
 
-- **Use a pooler URI where one is offered.** Serverless functions open a
-  connection per invocation; a direct-connection limit is small and you will
-  exhaust it. The pool is capped at one connection per invocation when a
-  serverless environment is detected.
+- **Use the transaction pooler (port 6543), not the direct connection.**
+  Serverless functions open a connection per invocation and the direct limit is
+  small. The pool is capped at one connection per invocation when a serverless
+  environment is detected. Nothing in this app uses named prepared statements,
+  session variables or advisory locks, so transaction-mode pooling is safe for
+  it.
 - **`sslmode=require` is mandatory for anything remote.** `getPool()` refuses
   a non-loopback URL without it rather than connecting in plaintext, and
   rather than silently adding it — you should be able to tell from the
