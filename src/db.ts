@@ -30,26 +30,46 @@ const isServerless = (): boolean =>
       process.env['LAMBDA_TASK_ROOT'],
   );
 
+/**
+ * The ledger's connection string.
+ *
+ * `DATABASE_URL` wins when set. `NETLIFY_DATABASE_URL` is the fallback:
+ * Netlify DB injects it automatically, and requiring it to be copied into a
+ * second variable by hand is a step that will eventually be done wrong — or
+ * left stale after the database is re-provisioned and the injected value
+ * changes underneath it.
+ */
+export function resolveConnectionString(): string {
+  const explicit = process.env['DATABASE_URL'];
+  if (explicit) return explicit;
+
+  const netlify = process.env['NETLIFY_DATABASE_URL'];
+  if (netlify) return netlify;
+
+  throw new Error(
+    'no database configured: set DATABASE_URL, or add Netlify DB which provides ' +
+      'NETLIFY_DATABASE_URL automatically',
+  );
+}
+
 export function getPool(): pg.Pool {
   if (!pool) {
-    const connectionString = process.env['DATABASE_URL'];
-    if (!connectionString) {
-      throw new Error('DATABASE_URL is not set');
-    }
+    const url = resolveConnectionString();
 
     // A ledger connection must not cross the internet in plaintext. Anything
     // that is not loopback has to declare SSL, and rather than quietly adding
     // it, this refuses — silently "fixing" a connection string is how you end
     // up unsure whether a given deploy was encrypted.
-    if (!isLocal(connectionString) && !/sslmode=(require|verify-ca|verify-full)/.test(connectionString)) {
+    if (!isLocal(url) && !/sslmode=(require|verify-ca|verify-full)/.test(url)) {
       throw new Error(
-        'a remote DATABASE_URL must specify sslmode=require (or stronger). ' +
-          'For Supabase, use the connection pooler URI and append ?sslmode=require',
+        'a remote database URL must specify sslmode=require (or stronger). ' +
+          'Netlify DB and Neon include it already; for Supabase, use the connection ' +
+          'pooler URI and append ?sslmode=require',
       );
     }
 
     pool = new pg.Pool({
-      connectionString,
+      connectionString: url,
       // One connection per invocation in serverless: each cold start gets its
       // own process, so a large pool multiplies by the number of concurrent
       // invocations and exhausts the database's connection limit.
