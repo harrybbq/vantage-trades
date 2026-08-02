@@ -150,7 +150,53 @@ platform, but the safest version of that rule is not setting it.
 Nothing here may be prefixed `VITE_`. That prefix bundles a value into public
 JavaScript.
 
+### Netlify's secrets scanner will fail the build if you let it
+
+Netlify scans the build output for the value of every environment variable and
+fails the build when it finds one. `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY` are *supposed* to be in the output — that is what the
+prefix means — so both are listed in `SECRETS_SCAN_OMIT_KEYS` in
+`netlify.toml`.
+
+This matters more than it sounds. When the build fails, Netlify keeps serving
+the last deploy that succeeded. Every environment variable you then correct
+appears to change nothing, because the site being served was compiled before
+you corrected anything. If a fix seems to have no effect, look at **Deploys**
+before you touch the variables again — the answer is usually that nothing has
+been built since.
+
+Never add a real secret to that list. It exists to stop the scanner flagging
+two values that are public by design, not to silence it.
+
 ## 3. What "working" looks like
+
+Start with `https://<site>/api/health`. It needs no sign-in — deliberately,
+because what it diagnoses is usually the reason you cannot sign in — and it
+names each thing that is wrong:
+
+```json
+{
+  "ok": false,
+  "checks": [
+    { "name": "SUPABASE_URL", "ok": true, "detail": "project abcdefgh" },
+    { "name": "SUPABASE_ANON_KEY matches SUPABASE_URL", "ok": false,
+      "detail": "the key is for project zyxwvuts but the URL points at abcdefgh. That is exactly what \"Invalid API key\" means." }
+  ],
+  "advice": ["Fix the variable named above, then redeploy. …"]
+}
+```
+
+It returns 200 when everything passes and 503 when it does not, and it reports
+project refs and booleans only — never a key, a password, a connection string
+or a user id. Signed in, it adds one line saying whether *you* are the owner.
+
+It checks the server's variables. It cannot see the browser's: those are
+compiled into the bundle. So `"ok": true` with a panel that still fails means
+the bundle is stale or was built with the wrong `VITE_` values — rebuild. The
+build itself now refuses to compile a mismatched or non-public key in, so a
+successful build rules most of that out.
+
+Then:
 
 - `https://<site>/` → a sign-in screen
 - Sign in with your Vantage account → the control panel
@@ -170,8 +216,23 @@ Then, from an empty database, the first run is:
 Nothing will trade: no broker is connected and the agent runner is not
 scheduled. Everything else — allocation, halt, kill, the ledger — is live.
 
-If functions return 500, check the function log: a missing or non-SSL database
-URL throws with a message saying exactly that.
+If functions return 500, check `/api/health` first, then the function log: a
+missing or non-SSL database URL throws with a message saying exactly that.
+
+### "Invalid API key"
+
+One message, four causes, and they need telling apart:
+
+| Where you see it | What it means |
+|---|---|
+| On the sign-in card | The browser bundle's `VITE_SUPABASE_ANON_KEY` does not match `VITE_SUPABASE_URL`. Both are compiled in, so fix them **and rebuild** |
+| In the panel after signing in | The server's `SUPABASE_ANON_KEY` and `SUPABASE_URL` disagree. `/api/health` will say so outright |
+| Neither, but nothing you change helps | The build is failing and Netlify is serving an older deploy. See secrets scanning above |
+| `/api/health` says everything is fine | A stale bundle. Trigger a rebuild with the cache cleared |
+
+The fastest confirmation of which project the site is actually talking to is
+the Supabase dashboard: **Logs → API**. If your site's requests are not there
+at all, its compiled-in URL points somewhere else.
 
 ## 4. The report token for Vantage
 

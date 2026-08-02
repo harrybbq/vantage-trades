@@ -127,7 +127,17 @@ function ControlPanel() {
         return;
       }
       if (status === 401) {
-        setError('Signed in, but this account is not the owner. Check OWNER_USER_ID.');
+        setError(
+          'Signed in, but the server would not accept it. That is either the wrong ' +
+            'account or a server-side Supabase setting — open /api/health, which says which.',
+        );
+        return;
+      }
+      if (status >= 500) {
+        setError(
+          `${e instanceof Error ? e.message : 'the server failed'} — /api/health checks the ` +
+            'configuration and names what is wrong.',
+        );
         return;
       }
 

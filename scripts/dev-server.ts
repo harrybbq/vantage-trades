@@ -10,6 +10,7 @@
 
 import { createServer } from 'node:http';
 import { handle, serialise } from '../src/server/handler.js';
+import { healthReport } from '../src/server/health.js';
 import { closePool } from '../src/db.js';
 
 const PORT = Number(process.env['API_PORT'] ?? 8788);
@@ -35,6 +36,18 @@ const server = createServer((req, res) => {
 
       if (req.method === 'OPTIONS') {
         res.writeHead(204).end();
+        return;
+      }
+
+      // Served here too, so the check behaves the same locally as deployed.
+      // The Vite proxy rewrites only /api/control, so this arrives unchanged.
+      if (/^\/(api\/)?health\b/.test(req.url ?? '')) {
+        const report = await healthReport(req.headers as Record<string, string | undefined>);
+        res.writeHead(report.ok ? 200 : 503, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        });
+        res.end(serialise(report));
         return;
       }
 

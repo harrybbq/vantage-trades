@@ -8,6 +8,20 @@
   # runtime rather than at build time, which is the worse place to find out.
   NODE_VERSION = "22"
 
+  # Netlify scans the build output for the value of every environment variable
+  # and fails the build when it finds one. These two are supposed to be in the
+  # output: Vite compiles them into the bundle, which is the entire point of
+  # the VITE_ prefix, and both are public by construction — the anon key
+  # identifies the project and grants nothing on its own.
+  #
+  # Without this exemption every build fails, Netlify keeps serving the last
+  # deploy that succeeded, and each corrected environment variable appears to
+  # change nothing at all. That failure mode is why this line exists.
+  #
+  # Only ever list VITE_ variables here. Exempting a real secret would turn
+  # off the check that stops it being published.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY"
+
 [functions]
   node_bundler = "esbuild"
 
