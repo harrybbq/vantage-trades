@@ -29,7 +29,16 @@ const jwt = (claims: Record<string, unknown>): string =>
 const anonFor = (ref: string) => jwt({ iss: 'supabase', ref, role: 'anon' });
 const serviceFor = (ref: string) => jwt({ iss: 'supabase', ref, role: 'service_role' });
 
-const OWNER = 'fa3bc586-6533-4248-a107-b6f53521cf73';
+/**
+ * Fictional, and it has to stay that way.
+ *
+ * The first version of this file used the real owner's user id, and Netlify's
+ * secrets scanner failed the build over it — correctly. A user id is not a
+ * credential, but it is the value `OWNER_USER_ID` holds, and a real one in a
+ * repository is a real one in every clone of it.
+ */
+const OWNER = '11111111-2222-4333-8444-555555555555';
+const SOMEBODY_ELSE = '99999999-8888-4777-8666-555555555555';
 
 const failed = (report: { checks: { name: string; ok: boolean }[] }) =>
   report.checks.filter((c) => !c.ok).map((c) => c.name);
@@ -270,7 +279,7 @@ describe('the health report', () => {
       .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ code: 401 }), { status: 401 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: '00000000-0000-4000-8000-000000000000' }), {
+        new Response(JSON.stringify({ id: SOMEBODY_ELSE }), {
           status: 200,
         }),
       );
@@ -283,6 +292,6 @@ describe('the health report', () => {
     expect(session?.ok).toBe(false);
     expect(session?.detail).toMatch(/not the owner/);
     // The other user's id is not this caller's business.
-    expect(JSON.stringify(report)).not.toContain('00000000-0000-4000-8000-000000000000');
+    expect(JSON.stringify(report)).not.toContain(SOMEBODY_ELSE);
   });
 });

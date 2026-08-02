@@ -161,7 +161,10 @@ function checkPair(env: Env, urlVar: string, keyVar: string): Check[] {
     detail: !keySet
       ? 'not set'
       : (key.fatal ??
-        (key.ref ? `${key.kind} key for project ${key.ref}` : `${key.kind} key`)),
+        (key.ref
+          ? `${key.kind} key for project ${key.ref}`
+          : `${key.kind} key — it names no project, so it cannot be checked ` +
+            `against ${urlVar} here. Only the project itself can tell you.`)),
   });
 
   // Only meaningful for legacy JWT keys; publishable keys carry no ref.
