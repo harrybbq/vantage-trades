@@ -719,3 +719,173 @@ input:focus-visible { outline: 2px solid var(--em); outline-offset: 1px; border-
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* --- performance view ----------------------------------------------------- */
+
+/* Series colours, validated for colour-blind separation against both
+   surfaces. The obvious choice — a muted grey benchmark against the green —
+   failed badly for deuteranopia (ΔE 4.4), so both series carry real chroma
+   and the hierarchy is done with dash and weight instead. */
+:root {
+  --series-fund: #12a45f;
+  --series-bench: #2bb6cc;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --series-fund: #1f9159;
+    --series-bench: #2f8fc4;
+  }
+}
+html[data-theme='dark'] {
+  --series-fund: #1f9159;
+  --series-bench: #2f8fc4;
+}
+html[data-theme='light'] {
+  --series-fund: #12a45f;
+  --series-bench: #2bb6cc;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  margin-bottom: -1px;
+}
+.tab:hover:not(:disabled) { background: none; color: var(--text); }
+.tab.is-active { color: var(--text); border-bottom-color: var(--em); }
+
+.stats-page { display: flex; flex-direction: column; gap: var(--space-5); }
+
+.panel-block {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-5);
+}
+.block-title {
+  font-family: var(--display);
+  font-size: var(--text-md);
+  font-weight: 600;
+  margin-bottom: var(--space-3);
+}
+.block-note { margin-top: var(--space-3); max-width: 78ch; }
+
+.empty-note {
+  background: var(--bg-overlay);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.chart { display: flex; flex-direction: column; gap: var(--space-2); }
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.legend-inline { display: flex; gap: var(--space-4); flex-wrap: wrap; }
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-mid);
+  /* A legend that wraps mid-phrase reads as three separate keys. */
+  white-space: nowrap;
+}
+.key svg { flex: none; width: 18px; height: 8px; }
+
+.chart-body { position: relative; }
+/* Scoped to the plot. `.chart svg` also matched the tiny legend swatches and
+   stretched them to full width, which broke each key onto two lines. */
+.chart-body > svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart text.endpoint {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.chart text.axis {
+  font-family: var(--mono);
+  font-size: 10px;
+  fill: var(--text-muted);
+}
+
+.chart-tip {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 6px 10px;
+  font-size: var(--text-xs);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 2;
+}
+.tip-date {
+  font-family: var(--mono);
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+.tip-row { display: flex; align-items: center; gap: 6px; color: var(--text-mid); }
+.tip-row b { color: var(--text); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.tip-key { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+.table-scroll { overflow-x: auto; max-width: 100%; margin-top: var(--space-3); }
+.figures-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.figures-table th,
+.figures-table td {
+  text-align: left;
+  padding: 6px var(--space-3) 6px 0;
+  border-bottom: 1px solid var(--border-lt);
+  white-space: nowrap;
+}
+.figures-table th {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.figures-table td.figure {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-curves {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: var(--space-5);
+}
+.mini-curve { display: flex; flex-direction: column; gap: var(--space-2); }
+.mini-curve header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.mini-name { font-weight: 600; font-size: var(--text-sm); }

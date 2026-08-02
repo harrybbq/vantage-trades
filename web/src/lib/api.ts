@@ -41,6 +41,40 @@ export interface ControlPanelView {
   agents: AgentView[];
 }
 
+export interface CurvePoint {
+  date: string;
+  equityMinor: string;
+  benchmarkMinor: string | null;
+}
+
+export interface AgentCurve {
+  agentId: string;
+  name: string;
+  status: string;
+  points: CurvePoint[];
+  returnPct: number | null;
+}
+
+export interface StatsView {
+  benchmarkSymbol: string;
+  fund: CurvePoint[];
+  fundReturnPct: number | null;
+  benchmarkReturnPct: number | null;
+  excessPct: number | null;
+  agents: AgentCurve[];
+  reconciliations: {
+    runAt: string;
+    asOf: string;
+    status: string;
+    cashDiffMinor: string;
+    equityDiffMinor: string | null;
+    summary: string;
+  }[];
+  totalFeesMinor: string;
+  totalTrades: number;
+  note: string | null;
+}
+
 export interface KillPreview {
   agentId: string;
   positions: { symbol: string; qty: string; costBasisMinor: string }[];
@@ -86,6 +120,9 @@ async function request<T>(init?: RequestInit): Promise<T> {
 }
 
 export const fetchPanel = (): Promise<ControlPanelView> => request<ControlPanelView>();
+
+export const fetchStats = (): Promise<StatsView> =>
+  request<StatsView>({ method: 'POST', body: JSON.stringify({ action: 'stats' }) });
 
 const post = <T>(body: Record<string, unknown>): Promise<T> =>
   request<T>({ method: 'POST', body: JSON.stringify(body) });

@@ -22,7 +22,7 @@ broker.** No real broker is connected, so no real money has moved.
 | 1. Ledger + paper broker | done against the simulator; **real broker adapter still to write** |
 | 2. One dumb agent | done — SMA crossover, with rails, benchmarked |
 | 3. Control panel | done — allocate, halt, kill, trading universe |
-| 3b. Stats UI (equity curve, benchmark chart) | not started |
+| 3b. Performance view (equity curve vs benchmark) | done |
 | 4. Read-only endpoint + Vantage widget | not started |
 | 5. LLM agents | not started |
 
@@ -40,7 +40,7 @@ src/pipeline/            order submission and fill sync
 src/api/, src/server/    the control-panel read model and its one handler
 netlify/functions/       the deployed API
 web/                     React 18 + Vite control panel, themed from Vantage
-tests/                   134 tests, mostly about what must not happen
+tests/                   143 tests, mostly about what must not happen
 ```
 
 ## Running it
@@ -150,6 +150,18 @@ One caveat worth knowing: the fund figure includes unallocated cash sitting
 idle, which drags it down against a fully-invested index. That is the honest
 comparison for "should I be doing this at all", but it is not a like-for-like
 measure of the strategy itself.
+
+## The performance view
+
+A second tab on the control panel. The fund's equity curve and the same
+starting capital left in the benchmark, **on one axis, both in pounds** — the
+benchmark is rebased server-side into money rather than shown as an index
+level, because a second y-axis lets any pair of lines tell any story.
+
+Series colours were validated for colour-blind separation against both
+surfaces. The obvious choice, a muted grey benchmark against the green fund
+line, failed badly for deuteranopia (ΔE 4.4 where 15 is the floor), so both
+series carry real chroma and the hierarchy is done with dash and weight.
 
 ## Research discipline
 

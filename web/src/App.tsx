@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import * as api from './lib/api';
 import type { AgentView, ControlPanelView } from './lib/api';
 import { Overview } from './components/Overview';
+import { Stats } from './components/Stats';
 import { AgentCard } from './components/AgentCard';
 import {
   AddAgentDialog,
@@ -60,7 +61,10 @@ function Reconciliation({ view }: { view: ControlPanelView }) {
   );
 }
 
+type Tab = 'control' | 'stats';
+
 export default function App() {
+  const [tab, setTab] = useState<Tab>('control');
   const [view, setView] = useState<ControlPanelView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -79,9 +83,12 @@ export default function App() {
     void load();
     // Poll rather than push. The numbers move when fills arrive, and a panel
     // showing a stale position is worse than one that is a few seconds behind.
+    // Only while the control tab is showing: the equity curve moves once a
+    // day, and polling it would be noise.
+    if (tab !== 'control') return;
     const timer = setInterval(() => void load(), 15_000);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, tab]);
 
   /** Run a control action, replacing the view with whatever the server committed. */
   const run = async (action: () => Promise<ControlPanelView>) => {
@@ -135,6 +142,23 @@ export default function App() {
         <Reconciliation view={view} />
       </div>
 
+      <nav className="tabs" aria-label="Sections">
+        <button
+          className={`tab${tab === 'control' ? ' is-active' : ''}`}
+          onClick={() => setTab('control')}
+          aria-current={tab === 'control' ? 'page' : undefined}
+        >
+          Control
+        </button>
+        <button
+          className={`tab${tab === 'stats' ? ' is-active' : ''}`}
+          onClick={() => setTab('stats')}
+          aria-current={tab === 'stats' ? 'page' : undefined}
+        >
+          Performance
+        </button>
+      </nav>
+
       {error && (
         <div className="banner-error">
           <span>
@@ -146,6 +170,10 @@ export default function App() {
         </div>
       )}
 
+      {tab === 'stats' ? (
+        <Stats />
+      ) : (
+        <>
       <Overview view={view} />
 
       <div className="global-bar">
@@ -187,6 +215,8 @@ export default function App() {
           </p>
         </article>
       </div>
+        </>
+      )}
 
       {dialog?.kind === 'capital' && (
         <CapitalDialog

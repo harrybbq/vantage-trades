@@ -15,6 +15,7 @@ import { ValidationError } from '../api/actions.js';
 import * as actions from '../api/actions.js';
 import { inTransaction } from '../db.js';
 import { controlPanelView } from '../api/view.js';
+import { statsView } from '../api/stats.js';
 
 export interface ApiRequest {
   method: string;
@@ -117,6 +118,10 @@ export async function handle(request: ApiRequest): Promise<ApiResponse> {
 
     const action = body['action'];
     switch (action) {
+      // Read-only, but a POST like everything else so there is one shape of
+      // request to authenticate and one place to add an action.
+      case 'stats':
+        return json(200, await inTransaction((tx) => statsView(tx)));
       case 'createAgent':
         return json(200, await actions.doCreateAgent(body as never, actor));
       case 'allocate':
