@@ -942,3 +942,24 @@ html[data-theme='light'] {
   padding: var(--space-3) var(--space-4);
   box-shadow: var(--shadow-sm);
 }
+
+/* --- the mark ----------------------------------------------------------- */
+
+.mark {
+  display: block;
+  flex: none;
+  border-radius: 22%;
+  user-select: none;
+}
+
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* On the sign-in card the mark sits above the title rather than beside it,
+   so the eye lands on the mark first and the form second. */
+.signin-head .mark {
+  margin-bottom: var(--space-3);
+}

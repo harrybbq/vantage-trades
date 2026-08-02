@@ -13,6 +13,7 @@ import {
   UniverseDialog,
 } from './components/dialogs';
 import { SignIn } from './components/SignIn';
+import { Mark } from './components/Mark';
 import { authConfigured, currentSession, onAuthChange, signOut } from './lib/auth';
 
 type Dialog =
@@ -187,12 +188,15 @@ function ControlPanel() {
   return (
     <div className="app">
       <div className="topbar">
-        <div>
+        <div className="brand-block">
+          <Mark size={56} />
+          <div>
           <span className="label">Digital factory</span>
           <h1>Agent control</h1>
           <p className="owner-tag">
             Owner only · identity verified server-side on every request that can move money
           </p>
+          </div>
         </div>
         <div className="topbar-right">
           <Reconciliation view={view} />

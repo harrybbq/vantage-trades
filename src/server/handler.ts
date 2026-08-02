@@ -94,6 +94,18 @@ export async function authenticate(
 
   if (!supabaseUrl || !ownerId) return null;
 
+  // SUPABASE_URL is the project's API origin — https://<ref>.supabase.co — and
+  // is NOT the database host. Mixing them up is easy when you have just been
+  // handling a connection string, and it fails as a bare "fetch failed" that
+  // explains nothing: db.<ref>.supabase.co resolves fine but serves no HTTPS.
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.(co|in)$/i.test(supabaseUrl)) {
+    throw new Error(
+      `SUPABASE_URL does not look like a project API URL (got "${supabaseUrl}"). ` +
+        'It should be https://<project-ref>.supabase.co — the Project URL from ' +
+        'Settings, not the database host and not the pooler host.',
+    );
+  }
+
   const header = headers['authorization'] ?? headers['Authorization'];
   if (!header?.startsWith('Bearer ')) return null;
   const token = header.slice('Bearer '.length);
@@ -101,9 +113,21 @@ export async function authenticate(
   const anonKey = process.env['SUPABASE_ANON_KEY']?.trim();
   if (!anonKey) return null;
 
-  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
-    headers: { Authorization: `Bearer ${token}`, apikey: anonKey },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: anonKey },
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch (error) {
+    // Node reports every connection-level failure as "fetch failed", which
+    // tells the owner nothing. Name what was being reached instead.
+    const why = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `could not reach ${supabaseUrl} to verify your session (${why}). ` +
+        'Check SUPABASE_URL is the project API URL and that the project is not paused.',
+    );
+  }
 
   if (!response.ok) {
     // The caller still gets a bland 401 — telling them which half failed is

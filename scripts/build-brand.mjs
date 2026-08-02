@@ -59,13 +59,22 @@ const compact = (accent, title) =>
   svg(title, [V(EM, 256, 246, 1), rule(256, 388, 116, accent)].join('\n'));
 
 mkdirSync('brand', { recursive: true });
+mkdirSync('web/public', { recursive: true });
+
+const tradesFull = full(ACCENT.trades, 'T', 'Vantage: Trades');
+// No letter below ~32px: it turns to mush, and the rule colour is what
+// actually distinguishes the siblings at that size.
+const tradesIcon = compact(ACCENT.trades, 'Vantage: Trades');
 
 const files = {
-  'brand/vantage-trades.svg': full(ACCENT.trades, 'T', 'Vantage: Trades'),
-  // No letter below ~32px: it turns to mush, and the rule colour is what
-  // actually distinguishes the siblings at that size.
-  'brand/vantage-trades-icon.svg': compact(ACCENT.trades, 'Vantage: Trades'),
+  'brand/vantage-trades.svg': tradesFull,
+  'brand/vantage-trades-icon.svg': tradesIcon,
   'brand/vantage-home.svg': full(ACCENT.home, 'H', 'Vantage: Home'),
+
+  // The app's copies are written from here rather than copied by hand, so the
+  // favicon cannot quietly fall behind the mark it is supposed to be.
+  'web/public/logo.svg': tradesFull,
+  'web/public/favicon.svg': tradesIcon,
 };
 
 for (const [path, content] of Object.entries(files)) {

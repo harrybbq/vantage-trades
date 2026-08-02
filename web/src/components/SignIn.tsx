@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { signIn } from '../lib/auth';
+import { Mark } from './Mark';
 
 /**
  * Sign in with the same account you use for Vantage.
@@ -31,6 +32,7 @@ export function SignIn() {
     <div className="signin-page">
       <form className="signin-card" onSubmit={(e) => void submit(e)}>
         <div className="signin-head">
+          <Mark size={56} />
           <span className="label">Digital factory</span>
           <h1>Agent control</h1>
           <p className="hint">Sign in with your Vantage account.</p>

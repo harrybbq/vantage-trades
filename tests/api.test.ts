@@ -70,6 +70,46 @@ describe('authentication', () => {
     delete process.env['NODE_ENV'];
   });
 
+  it('names a SUPABASE_URL that is not a project API URL', async () => {
+    const restore = { ...process.env };
+    try {
+      delete process.env['AUTH_MODE'];
+      process.env['OWNER_USER_ID'] = 'someone';
+
+      // The database host and the pooler host both look plausible after you
+      // have just pasted a connection string, and both fail as a bare
+      // "fetch failed" that explains nothing.
+      for (const bad of [
+        'db.abcdefgh.supabase.co',
+        'https://db.abcdefgh.supabase.co',
+        'aws-0-eu-west-2.pooler.supabase.com',
+        'abcdefgh.supabase.co',
+        'https://abcdefgh.supabase.co/auth/v1',
+      ]) {
+        process.env['SUPABASE_URL'] = bad;
+        const result = await handle({ method: 'GET', path: '/', headers: AUTHED, body: null });
+
+        expect(result.status, `should reject ${bad}`).toBe(500);
+        expect((result.body as { error: string }).error).toMatch(
+          /does not look like a project API URL/,
+        );
+      }
+
+      // A trailing slash is normalised rather than rejected — it is a paste
+      // artefact, not a wrong value, and refusing it would be pedantry.
+      process.env['SUPABASE_URL'] = 'https://abcdefgh.supabase.co/';
+      const ok = await handle({ method: 'GET', path: '/', headers: AUTHED, body: null });
+      expect((ok.body as { error?: string }).error ?? '').not.toMatch(/does not look like/);
+    } finally {
+      // Restore explicitly: a failure mid-loop would otherwise leave AUTH_MODE
+      // unset and cascade into every test after this one.
+      for (const key of ['AUTH_MODE', 'OWNER_USER_ID', 'SUPABASE_URL']) {
+        if (restore[key] === undefined) delete process.env[key];
+        else process.env[key] = restore[key];
+      }
+    }
+  });
+
   it('refuses the local bypass on a hosted platform, whatever NODE_ENV says', async () => {
     // The natural reaction to a deployed panel returning 401 is to try
     // AUTH_MODE=insecure-local. Netlify does not reliably set NODE_ENV at
