@@ -277,8 +277,17 @@ single-JSON-state design, deliberately.
 ## Open decisions
 
 - Broker: Alpaca (easy API, US equities, free paper) vs IBKR (broader
-  markets, paper API matches live). Affects nothing structural — the
-  ledger is broker-agnostic if you keep an adapter layer.
+  markets, paper API matches live). The adapter layer keeps the ledger
+  broker-agnostic — but **currency is not** covered by that, which the
+  original note got wrong.
+
+  The ledger is sterling and single-currency, enforced in the schema: an
+  entry mixing currencies balances at one exchange rate and not at
+  another, so "does this sum to zero" stops having a single answer and
+  reconciliation quietly stops meaning anything. Alpaca is USD, so
+  trading through it needs an FX account and a decision about which rate
+  applies when — real work, before the first fill, not a config change.
+  IBKR can hold GBP directly and avoids it. See `docs/LEDGER.md`.
 - Whether agents may hold the same symbol simultaneously, or whether the
   factory enforces exclusive ownership per symbol. Simplifies attribution
   and reduces accidental concentration, at the cost of flexibility.

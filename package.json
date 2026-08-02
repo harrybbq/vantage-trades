@@ -1,0 +1,26 @@
+{
+  "name": "vantage-trades",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Trading agents app - allocation ledger and per-agent attribution",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:reset": "./scripts/db-reset.sh",
+    "db:test": "./scripts/db-test.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

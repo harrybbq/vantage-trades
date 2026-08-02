@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+
+# Never commit real credentials. .env.example is the only env file tracked.
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
+.vitest/
