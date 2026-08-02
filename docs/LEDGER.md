@@ -137,13 +137,49 @@ cannot return to the pool until the sells have actually filled.
 resumes or starts fresh is still an open decision and should not be settled by
 a stray click.
 
+## How equity is reconciled
+
+Reconciliation values the **aggregate** position per symbol, then sums — not
+the sum of per-agent equities.
+
+The reason is arithmetic. A broker values one position of 9 shares. We
+attribute 4 to one agent and 5 to another, and with fractional shares,
+rounding each agent's slice separately can land a penny away from rounding the
+whole. Reconciling on the per-agent sum would report a divergence every day,
+and a check that cries wolf is a check nobody reads.
+
+**The consequence is real and worth knowing:** per-agent equities need not sum
+exactly to total equity when fractional shares are held. That residual is a
+display artefact of attribution, not a ledger error. Cash and per-symbol
+quantities are always exact.
+
+## The order path
+
+1. write the order to the ledger — halt is enforced here, by the schema
+2. place it with the broker
+3. record the broker's id against it
+
+Placing first would leave a live order with no row if the process died in
+between: the one failure that truly loses track of a position. This way the
+worst case is an order row with no broker id, which `findOrphanedOrders()`
+lists and the idempotency key makes safe to re-submit.
+
+Steps 1 and 3 are separate transactions. Holding a database transaction open
+across a network call to a broker is how a slow broker becomes an outage.
+
+A broker fill whose order is not in the ledger is **never** guessed at. It is
+reported as unattributable and fails reconciliation. Attributing it to the
+wrong agent would corrupt two agents' numbers and be very hard to unpick.
+
 ## What is not built yet
 
-- **No broker adapter.** `src/broker/types.ts` is the interface; nothing
-  implements it. Per the build order, the ledger reconciles against a paper
-  account before any agent places anything.
-- **No agents.** No loop, no strategy, no LLM.
+- **No real broker.** `src/broker/paper.ts` is a simulator. The interface it
+  implements is what a real adapter must satisfy.
+- **No agents.** No loop, no strategy, no LLM. Every trade so far is
+  hand-placed.
 - **No UI, no reporting endpoint.**
 - **No benchmark tracking.** Equity curve against buy-and-hold needs to exist
   from the first day an agent runs — retrofitting an honest benchmark never
   happens.
+- **No FX.** Single-currency, sterling. See above: this constrains the broker
+  choice.

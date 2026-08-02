@@ -64,6 +64,12 @@ export interface BrokerFill {
   filledAt: Date;
 }
 
+export interface Quote {
+  symbol: string;
+  pricePerUnitMinor: Minor;
+  asOf: Date;
+}
+
 export interface BrokerAdapter {
   readonly name: string;
   /**
@@ -79,4 +85,23 @@ export interface BrokerAdapter {
   cancelOrder(brokerOrderId: string): Promise<void>;
   /** Fills at or after `since`, for the poller that feeds `recordFill`. */
   getFills(since: Date): Promise<BrokerFill[]>;
+  /**
+   * Prices for valuing positions. These are stored into ledger.marks rather
+   * than read at display time, so a figure shown in the UI can be reproduced
+   * later and reconciliation compares like with like.
+   */
+  getQuotes(symbols: readonly string[]): Promise<Quote[]>;
+}
+
+/**
+ * Deliberately not part of `BrokerAdapter`.
+ *
+ * Real broker APIs cannot deposit or withdraw cash — that is a fraud boundary,
+ * not an oversight, and money enters the account by manual bank transfer. Only
+ * the simulator can do this, and keeping it off the shared interface means no
+ * code written against `BrokerAdapter` can come to depend on something that
+ * will not exist against a real broker.
+ */
+export interface FundableBroker {
+  fundAccount(amountMinor: Minor): Promise<void>;
 }

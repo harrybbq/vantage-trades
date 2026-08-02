@@ -15,8 +15,8 @@
  */
 
 import type { Sql } from '../db.js';
-import { formatGBP, formatQty, parseQty, type Minor, type Qty } from '../money.js';
-import { allAgentEquities, unallocatedPool } from './equity.js';
+import { formatGBP, formatQty, notional, parseQty, type Minor, type Qty } from '../money.js';
+import { allAgentEquities, latestMarks, unallocatedPool } from './equity.js';
 
 /** What the broker says. Supplied by a broker adapter. */
 export interface BrokerSnapshot {
@@ -51,16 +51,45 @@ export async function reconcile(
   const equities = await allAgentEquities(tx, snapshot.asOf);
   const pool = await unallocatedPool(tx);
 
-  const unpricedSymbols = [...new Set(equities.flatMap((e) => e.unpricedSymbols))].sort();
-
   const computedCash = equities.reduce((acc, e) => acc + e.cashMinor, 0n) + pool;
+
+  // Value the aggregate position per symbol, then sum — deliberately not the
+  // sum of per-agent equities.
+  //
+  // A broker values one position of 9 shares. We attribute 4 to one agent and
+  // 5 to another, and with fractional shares rounding each agent's slice
+  // separately can land a penny away from rounding the whole. Reconciling on
+  // the per-agent sum would then report a divergence every single day, and a
+  // check that cries wolf is a check nobody reads. So this mirrors the
+  // broker's own arithmetic.
+  //
+  // The consequence, which is real and worth knowing: per-agent equities need
+  // not sum exactly to total equity when fractional shares are held. That
+  // residual is a display artefact of attribution, not a ledger error.
+  const positions = await tx.query<{ symbol: string; qty: string }>(
+    `select symbol, qty::text as qty from ledger.expected_broker_positions order by symbol`,
+  );
+
+  const marks = await latestMarks(
+    tx,
+    positions.rows.map((r) => r.symbol),
+    snapshot.asOf,
+  );
+
+  const unpricedSymbols = positions.rows
+    .filter((r) => !marks.has(r.symbol))
+    .map((r) => r.symbol)
+    .sort();
 
   // With a symbol unpriced, equity is unknown. Reporting it as zero drift
   // would be a green tick that means nothing, so this is recorded as a
   // divergence needing attention.
   const computedEquity = unpricedSymbols.length
     ? null
-    : equities.reduce((acc, e) => acc + (e.equityMinor ?? 0n), 0n) + pool;
+    : positions.rows.reduce(
+        (acc, r) => acc + notional(parseQty(r.qty), marks.get(r.symbol) ?? 0n),
+        computedCash,
+      );
 
   const cashDiff = snapshot.cashMinor - computedCash;
   const equityDiff = computedEquity === null ? null : snapshot.equityMinor - computedEquity;
