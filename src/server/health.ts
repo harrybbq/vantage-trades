@@ -13,8 +13,9 @@
  * token, which tells them nothing they did not already know.
  */
 
-import { projectRefFromUrl, probeSupabase, serverConfigReport } from './config.js';
+import { projectRefFromUrl, probeSupabase, redact, serverConfigReport } from './config.js';
 import type { Check } from './config.js';
+import { getPool } from '../db.js';
 
 export interface HealthReport {
   ok: boolean;
@@ -78,10 +79,64 @@ async function describeCaller(
   };
 }
 
+/**
+ * Connect, and check the schema is actually there.
+ *
+ * A reachable database with no `ledger` schema is its own distinct failure —
+ * the installer was never run, or was run against a different project — and it
+ * produces a 500 that looks exactly like a connection problem.
+ *
+ * Read-only, and touches no table that holds money.
+ */
+async function checkDatabase(): Promise<Check[]> {
+  let client;
+  try {
+    client = await getPool().connect();
+  } catch (error) {
+    return [
+      {
+        name: 'database',
+        ok: false,
+        detail: redact(error instanceof Error ? error.message : String(error)),
+      },
+    ];
+  }
+
+  try {
+    const { rows } = await client.query<{ installed: string | null }>(
+      "select to_regclass('ledger.agents')::text as installed",
+    );
+    const installed = rows[0]?.installed ?? null;
+
+    return [
+      { name: 'database', ok: true, detail: 'connected' },
+      {
+        name: 'ledger schema',
+        ok: installed !== null,
+        detail: installed
+          ? 'installed'
+          : 'connected, but the ledger schema is not there. Run supabase/install.sql ' +
+            'against this database — or check DATABASE_URL points at the one you installed into.',
+      },
+    ];
+  } catch (error) {
+    return [
+      {
+        name: 'ledger schema',
+        ok: false,
+        detail: redact(error instanceof Error ? error.message : String(error)),
+      },
+    ];
+  } finally {
+    client.release();
+  }
+}
+
 export async function healthReport(
   headers: Record<string, string | undefined> = {},
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
+  probeDatabase: () => Promise<Check[]> = checkDatabase,
 ): Promise<HealthReport> {
   const config = serverConfigReport(env);
   const checks = [...config.checks];
@@ -106,6 +161,12 @@ export async function healthReport(
     if (caller) checks.push(caller);
   }
 
+  // Only worth connecting once the string is the right shape; otherwise the
+  // driver error says less than the check above already did.
+  if (checks.find((check) => check.name === 'DATABASE_URL')?.ok) {
+    checks.push(...(await probeDatabase()));
+  }
+
   const failed = checks.filter((check) => !check.ok).map((check) => check.name);
   const advice: string[] = [];
 
@@ -123,6 +184,16 @@ export async function healthReport(
   }
   if (failed.includes('your session')) {
     advice.push('Sign out and sign in again to rule out a stale token.');
+  }
+  if (failed.includes('database') || failed.includes('DATABASE_URL')) {
+    advice.push(
+      'The panel cannot load without the ledger, so this alone produces a 500 on ' +
+        'every request. Supabase → Settings → Database → Connection pooling, ' +
+        'transaction mode, and append ?sslmode=require.',
+    );
+  }
+  if (failed.includes('ledger schema')) {
+    advice.push('Run supabase/install.sql against the database DATABASE_URL points at.');
   }
   if (!failed.length) {
     advice.push(

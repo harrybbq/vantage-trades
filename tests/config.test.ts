@@ -12,6 +12,7 @@ import {
   inspectKey,
   probeSupabase,
   projectRefFromUrl,
+  redact,
   serverConfigReport,
   webConfigReport,
   type Env,
@@ -156,6 +157,55 @@ describe('the server report', () => {
     expect(failed(report)).toEqual([]);
   });
 
+  it('catches the direct database host, which serverless cannot reach', () => {
+    // Supabase's direct host is IPv6-only. From a Netlify function it fails to
+    // route, and the driver error reads like the database being down.
+    const report = serverConfigReport({
+      ...good,
+      DATABASE_URL: 'postgresql://postgres:pw@db.abcdefgh.supabase.co:5432/postgres?sslmode=require',
+    });
+    expect(failed(report)).toContain('DATABASE_URL');
+    expect(report.checks.find((c) => c.name === 'DATABASE_URL')?.detail).toMatch(/IPv6-only/);
+  });
+
+  it('catches the pooler being given the plain postgres username', () => {
+    const report = serverConfigReport({
+      ...good,
+      DATABASE_URL:
+        'postgresql://postgres:pw@aws-0-eu-west-2.pooler.supabase.com:6543/postgres?sslmode=require',
+    });
+    expect(report.checks.find((c) => c.name === 'DATABASE_URL')?.detail).toMatch(
+      /Tenant or user not found/,
+    );
+  });
+
+  it('accepts a correct pooler URI', () => {
+    const report = serverConfigReport({
+      ...good,
+      DATABASE_URL:
+        'postgresql://postgres.abcdefgh:pw@aws-0-eu-west-2.pooler.supabase.com:6543/postgres?sslmode=require',
+    });
+    expect(failed(report)).toEqual([]);
+  });
+
+  it('never echoes the password, whatever it decides', () => {
+    for (const url of [
+      'postgresql://postgres:hunter2@db.abcdefgh.supabase.co:5432/postgres?sslmode=require',
+      'postgresql://postgres:hunter2@aws-0-eu-west-2.pooler.supabase.com:6543/postgres?sslmode=require',
+      'postgresql://postgres:hunter2@host:6543/postgres',
+    ]) {
+      expect(JSON.stringify(serverConfigReport({ ...good, DATABASE_URL: url }))).not.toContain(
+        'hunter2',
+      );
+    }
+  });
+
+  it('strips credentials out of driver errors', () => {
+    expect(redact('connect ECONNREFUSED postgresql://postgres:hunter2@host:6543/db')).not.toContain(
+      'hunter2',
+    );
+  });
+
   it('flags AUTH_MODE being set at all', () => {
     const report = serverConfigReport({ ...good, AUTH_MODE: 'insecure-local' });
     expect(failed(report)).toContain('AUTH_MODE');
@@ -239,25 +289,33 @@ describe('the health report', () => {
   const accepts = () =>
     vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 401 }), { status: 401 }));
 
+  // The real probe opens a connection using process.env, which these tests
+  // deliberately do not control. What it reports is covered by its own tests.
+  const dbOk = async () => [
+    { name: 'database', ok: true, detail: 'connected' },
+    { name: 'ledger schema', ok: true, detail: 'installed' },
+  ];
+
   it('does not probe the network when the URL is malformed', async () => {
     const fake = vi.fn();
     const report = await healthReport(
       {},
       { ...env, SUPABASE_URL: 'db.abcdefgh.supabase.co' },
       fake as unknown as typeof fetch,
+      dbOk,
     );
     expect(fake).not.toHaveBeenCalled();
     expect(report.ok).toBe(false);
   });
 
   it('passes a sound configuration, and says the bundle is next to suspect', async () => {
-    const report = await healthReport({}, env, accepts() as unknown as typeof fetch);
+    const report = await healthReport({}, env, accepts() as unknown as typeof fetch, dbOk);
     expect(report.ok).toBe(true);
     expect(report.advice.join(' ')).toMatch(/build time/);
   });
 
   it('says nothing about a caller who presented no token', async () => {
-    const report = await healthReport({}, env, accepts() as unknown as typeof fetch);
+    const report = await healthReport({}, env, accepts() as unknown as typeof fetch, dbOk);
     expect(report.checks.map((c) => c.name)).not.toContain('your session');
   });
 
@@ -270,6 +328,7 @@ describe('the health report', () => {
       { authorization: 'Bearer token' },
       env,
       fake as unknown as typeof fetch,
+      dbOk,
     );
     expect(report.checks.find((c) => c.name === 'your session')).toMatchObject({ ok: true });
   });
@@ -287,6 +346,7 @@ describe('the health report', () => {
       { authorization: 'Bearer token' },
       env,
       fake as unknown as typeof fetch,
+      dbOk,
     );
     const session = report.checks.find((c) => c.name === 'your session');
     expect(session?.ok).toBe(false);

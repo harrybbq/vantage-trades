@@ -184,6 +184,84 @@ function checkPair(env: Env, urlVar: string, keyVar: string): Check[] {
 }
 
 /**
+ * Strip credentials out of anything before it is reported or logged.
+ *
+ * Driver errors quote the connection string surprisingly often, and a health
+ * endpoint that helpfully echoes the password back is worse than no health
+ * endpoint at all.
+ */
+export function redact(text: string): string {
+  return text.replace(/\/\/[^/\s@]*:[^/\s@]*@/g, '//***:***@');
+}
+
+/**
+ * What the connection string is, without saying what it contains.
+ *
+ * Two Supabase-specific mistakes are worth catching by inspection, because
+ * both fail at connect time with a message that does not obviously name its
+ * own cause:
+ *
+ * - the **direct** host, `db.<ref>.supabase.co`, resolves to IPv6 only, and
+ *   serverless platforms generally cannot reach it — it times out or fails to
+ *   route, which reads like the database being down;
+ * - the **pooler** requires the username `postgres.<ref>`, not `postgres`,
+ *   and rejects the plain form with "Tenant or user not found", which reads
+ *   like a missing database.
+ */
+function checkDatabaseUrl(env: Env): Check[] {
+  const raw = env['DATABASE_URL']?.trim() || env['NETLIFY_DATABASE_URL']?.trim();
+  if (!raw) return [{ name: 'DATABASE_URL', ok: false, detail: 'not set' }];
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return [{ name: 'DATABASE_URL', ok: false, detail: 'set, but not a valid URL' }];
+  }
+
+  const host = parsed.hostname;
+  const user = decodeURIComponent(parsed.username);
+  const local = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(host);
+
+  if (!local && !/sslmode=(require|verify-ca|verify-full)/i.test(raw)) {
+    return [
+      { name: 'DATABASE_URL', ok: false, detail: 'set, but missing ?sslmode=require' },
+    ];
+  }
+
+  const direct = /^db\.([a-z0-9-]+)\.supabase\.co$/i.exec(host);
+  if (direct) {
+    return [
+      {
+        name: 'DATABASE_URL',
+        ok: false,
+        detail:
+          `points at the direct database host (${host}). That host is IPv6-only and ` +
+          'serverless functions usually cannot reach it. Use the transaction pooler ' +
+          'URI from Settings → Database instead — host …pooler.supabase.com, port 6543.',
+      },
+    ];
+  }
+
+  if (/pooler\.supabase\.com$/i.test(host)) {
+    const ok = /^postgres\.[a-z0-9-]+$/i.test(user);
+    return [
+      {
+        name: 'DATABASE_URL',
+        ok,
+        detail: ok
+          ? `transaction pooler, sslmode set, user postgres.<ref>`
+          : `pooler host, but the username is "${user}". The pooler needs ` +
+            'postgres.<project-ref> and answers "Tenant or user not found" without it. ' +
+            'Copy the URI from Settings → Database rather than editing the direct one.',
+      },
+    ];
+  }
+
+  return [{ name: 'DATABASE_URL', ok: true, detail: local ? 'local' : 'set, sslmode set' }];
+}
+
+/**
  * The server's own configuration, as a list of named checks.
  *
  * Reports refs and shapes only. No key, no password, no connection string, and
@@ -199,17 +277,7 @@ export function serverConfigReport(env: Env = process.env): ConfigReport {
     detail: !owner ? 'not set' : UUID.test(owner) ? 'set' : 'set, but not a UUID',
   });
 
-  const database = env['DATABASE_URL']?.trim() ?? env['NETLIFY_DATABASE_URL']?.trim();
-  const requiresSsl = database ? /sslmode=require/i.test(database) : false;
-  checks.push({
-    name: 'DATABASE_URL',
-    ok: Boolean(database) && requiresSsl,
-    detail: !database
-      ? 'not set'
-      : requiresSsl
-        ? 'set, sslmode=require'
-        : 'set, but missing ?sslmode=require',
-  });
+  checks.push(...checkDatabaseUrl(env));
 
   // Never legitimately set on a deployed site. The handler already refuses to
   // honour it there, but a deployment that has it set at all is a deployment
