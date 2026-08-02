@@ -86,8 +86,21 @@ async function recordOne(
     filledAt: fill.filledAt,
   });
 
+  // An order is only 'filled' once the fills add up to what was ordered.
+  //
+  // Marking it filled on the first fill was wrong: the simulator always fills
+  // completely, so nothing caught it, but a real broker filling 4 of 10 would
+  // have closed the order and left the remaining 6 arriving against something
+  // already done.
   await tx.query(
-    `update ledger.orders set status = 'filled', updated_at = now() where id = $1`,
+    `update ledger.orders o
+        set status = case
+              when (select coalesce(sum(f.qty), 0) from ledger.fills f where f.order_id = o.id) >= o.qty
+                then 'filled'::ledger.order_status
+              else 'partially_filled'::ledger.order_status
+            end,
+            updated_at = now()
+      where o.id = $1`,
     [matched.id],
   );
 

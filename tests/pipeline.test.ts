@@ -10,6 +10,8 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { inTransaction, closePool, getPool } from '../src/db.js';
 import { parseMoney, parseQty, formatGBP } from '../src/money.js';
 import { PaperBroker, DEFAULT_COSTS } from '../src/broker/paper.js';
+import { createOrder } from '../src/ledger/orders.js';
+import { recordFill } from '../src/ledger/fills.js';
 import { recordDeposit, allocate } from '../src/ledger/allocation.js';
 import { halt, start } from '../src/ledger/control.js';
 import { agentEquity } from '../src/ledger/equity.js';
@@ -435,5 +437,100 @@ describe('the money the owner actually sees', () => {
     await fundBoth('1234.56');
     const account = await broker().getAccount();
     expect(formatGBP(account.cashMinor)).toBe('£1234.56');
+  });
+});
+
+describe('partial fills', () => {
+  it('leaves an order partially_filled until the fills add up', async () => {
+    await fundBoth('5000.00');
+    await inTransaction(async (tx) => {
+      await newAgent(tx, 'momentum-1', 'Momentum');
+      await allocate(tx, 'momentum-1', parseMoney('2000.00'));
+      await start(tx, 'momentum-1', 'owner');
+    });
+    await broker().setPrice('AAPL', parseMoney('100.00'));
+
+    // A venue with only 4 of the 10 available at the top of the book.
+    const partial = new PaperBroker(getPool(), DEFAULT_COSTS, { maxFillQty: parseQty('4') });
+    const placed = await submitOrder(partial, {
+      agentId: 'momentum-1',
+      symbol: 'AAPL',
+      side: 'buy',
+      qty: parseQty('10'),
+      idempotencyKey: 'partial-1',
+    });
+
+    await syncFills(partial);
+
+    let order = await getPool().query<{ status: string }>(
+      `select status from ledger.orders where id = $1`,
+      [placed.orderId],
+    );
+    // Marking this 'filled' would close an order with 6 shares still working.
+    expect(order.rows[0]?.status).toBe('partially_filled');
+
+    let equity = await inTransaction((tx) => agentEquity(tx, 'momentum-1'));
+    expect(equity.holdings[0]?.qty).toBe(parseQty('4'));
+
+    // The rest arrives.
+    await partial.fillRemainder(placed.brokerOrderId);
+    await syncFills(partial);
+
+    order = await getPool().query<{ status: string }>(
+      `select status from ledger.orders where id = $1`,
+      [placed.orderId],
+    );
+    expect(order.rows[0]?.status).toBe('filled');
+
+    equity = await inTransaction((tx) => agentEquity(tx, 'momentum-1'));
+    expect(equity.holdings[0]?.qty).toBe(parseQty('10'));
+
+    // Two fills, two lots, and the whole thing still reconciles.
+    const fills = await getPool().query<{ n: string }>(
+      `select count(*)::text as n from ledger.fills where order_id = $1`,
+      [placed.orderId],
+    );
+    expect(fills.rows[0]?.n).toBe('2');
+
+    await syncMarks(partial);
+    expect(await runDailyReconcile(partial)).toBe(true);
+  });
+
+  it('refuses fills that would exceed what was ordered', async () => {
+    await fundBoth('5000.00');
+    await inTransaction(async (tx) => {
+      await newAgent(tx, 'momentum-1', 'Momentum');
+      await allocate(tx, 'momentum-1', parseMoney('2000.00'));
+      await start(tx, 'momentum-1', 'owner');
+    });
+    await broker().setPrice('AAPL', parseMoney('100.00'));
+
+    const orderId = await inTransaction((tx) =>
+      createOrder(tx, {
+        agentId: 'momentum-1',
+        symbol: 'AAPL',
+        side: 'buy',
+        qty: parseQty('5'),
+        idempotencyKey: 'overfill-guard',
+      }),
+    );
+
+    const fill = (n: string, id: string) => ({
+      orderId,
+      agentId: 'momentum-1',
+      symbol: 'AAPL',
+      side: 'buy' as const,
+      qty: parseQty(n),
+      pricePerUnitMinor: parseMoney('100.00'),
+      brokerFillId: id,
+      filledAt: new Date(),
+    });
+
+    await inTransaction((tx) => recordFill(tx, fill('4', 'of-1')));
+
+    // 4 + 2 > 5. A position larger than anything anyone asked for.
+    await expect(
+      inTransaction((tx) => recordFill(tx, fill('2', 'of-2'))),
+    ).rejects.toThrow(/but only 5.00000000 was ordered/);
   });
 });

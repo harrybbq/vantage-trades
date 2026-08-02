@@ -18,7 +18,8 @@
     "dev:web": "vite",
     "build": "vite build",
     "job:agents": "tsx src/jobs/run-agents.ts",
-    "demo:agent": "tsx src/jobs/agent-demo.ts"
+    "demo:agent": "tsx src/jobs/agent-demo.ts",
+    "demo:research": "tsx src/jobs/research-demo.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

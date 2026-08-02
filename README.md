@@ -7,8 +7,10 @@ Sterling. Personal project, owner's own money.
 Vantage gets a read-only widget looking into this app. This app is the source
 of truth; Vantage never sends orders and never holds broker credentials.
 
-See [`CLAUDE.md`](CLAUDE.md) for the decisions behind the design and
-[`docs/LEDGER.md`](docs/LEDGER.md) for how the ledger works.
+See [`CLAUDE.md`](CLAUDE.md) for the decisions behind the design,
+[`docs/LEDGER.md`](docs/LEDGER.md) for how the ledger works, and
+[`docs/RESEARCH.md`](docs/RESEARCH.md) for what can and cannot be established
+about a strategy before real money.
 
 ## Status
 
@@ -33,11 +35,12 @@ src/ledger/              accounts, journal, allocation, fills, lots, equity,
                          reconciliation, agent control, trading universe
 src/broker/paper.ts      simulator: spread, slippage, commission, own books
 src/agents/              strategy interface, SMA crossover, the runner
+src/research/            backtester, metrics, experiment register, hold-outs
 src/pipeline/            order submission and fill sync
 src/api/, src/server/    the control-panel read model and its one handler
 netlify/functions/       the deployed API
 web/                     React 18 + Vite control panel, themed from Vantage
-tests/                   109 tests, mostly about what must not happen
+tests/                   134 tests, mostly about what must not happen
 ```
 
 ## Running it
@@ -73,6 +76,11 @@ still shows two different P/L figures.
 `npm run demo:agent` runs the dumb agent over 120 simulated days and prints
 its return next to buy-and-hold. It loses. That is the expected result and the
 reason the benchmark exists.
+
+`npm run demo:research` shows what searching for a strategy actually looks
+like: twelve variants, a winner, and then the two things that are usually
+invisible — how much the winner's result is worth once you account for having
+tried twelve, and how it does on data it has never seen.
 
 ## The control panel
 
@@ -142,3 +150,17 @@ One caveat worth knowing: the fund figure includes unallocated cash sitting
 idle, which drags it down against a fully-invested index. That is the honest
 comparison for "should I be doing this at all", but it is not a like-for-like
 measure of the strategy itself.
+
+## Research discipline
+
+`src/research/` is the tooling for not fooling yourself, and
+[`docs/RESEARCH.md`](docs/RESEARCH.md) explains why each piece exists.
+
+The short version: with a Sharpe of 0.5 you need about 16 years of data to
+tell skill from luck, and testing twenty variants means one clears a 5% bar by
+chance. So every experiment is registered before it runs with an immutable
+hypothesis, the count of trials raises the significance bar, and held-out data
+is sealed behind a one-way lock.
+
+None of it makes a strategy work. It makes it harder to believe one does when
+it does not.

@@ -70,6 +70,10 @@ jobs:
       - name: Agent demo
         run: npm run demo:agent
 
+      # The search-and-holdout workflow, end to end.
+      - name: Research demo
+        run: npm run demo:research
+
       # The ledger must sum to exactly zero across all accounts. Asserted here
       # as well as in the tests, because it is the one invariant whose failure
       # means every number downstream is fiction.

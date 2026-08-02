@@ -14,6 +14,7 @@
 
 import type { Sql } from '../db.js';
 import { notional, parseQty, type Minor, type Qty } from '../money.js';
+import { executionPrice, DEFAULT_COSTS as SHARED_COSTS, type ExecutionCosts } from './costs.js';
 import type {
   BrokerAccount,
   BrokerAdapter,
@@ -25,35 +26,25 @@ import type {
   Quote,
 } from './types.js';
 
-export interface PaperBrokerCosts {
-  /** Half-spread in basis points, paid on every trade in both directions. */
-  spreadBps: bigint;
-  /** Additional adverse price movement in basis points, on market orders. */
-  slippageBps: bigint;
-  /** Flat commission per fill, in minor units. */
-  commissionMinor: Minor;
-}
-
-/**
- * Defaults sit near the pessimistic end on purpose. A simulator that flatters
- * a strategy is worse than no simulator, because it produces a number that
- * feels earned.
- */
-export const DEFAULT_COSTS: PaperBrokerCosts = {
-  spreadBps: 5n,
-  slippageBps: 2n,
-  commissionMinor: 100n,
-};
-
-const BPS = 10_000n;
+/** Re-exported so existing callers keep working; defined in ./costs.ts. */
+export type PaperBrokerCosts = ExecutionCosts;
+export { DEFAULT_COSTS } from './costs.js';
 
 export class PaperBroker implements BrokerAdapter, FundableBroker {
   readonly name = 'paper';
   readonly isPaper = true;
 
+  /**
+   * `maxFillQty` makes the simulator fill in pieces, like a real venue does
+   * when there is not enough at the top of the book. Off by default, because
+   * most tests do not care — but the partial path needs exercising somewhere,
+   * and "the simulator always fills completely" is how a real broker's first
+   * partial fill becomes a production surprise.
+   */
   constructor(
     private readonly tx: Sql,
-    private readonly costs: PaperBrokerCosts = DEFAULT_COSTS,
+    private readonly costs: ExecutionCosts = SHARED_COSTS,
+    private readonly options: { maxFillQty?: Qty } = {},
   ) {}
 
   /** Simulates the manual bank transfer that a real broker API cannot do. */
@@ -160,10 +151,48 @@ export class PaperBroker implements BrokerAdapter, FundableBroker {
     if (!row) throw new Error('failed to place paper order');
 
     if (!rejection) {
-      await this.fill(row.id, symbol, request.side, request.qty, executionPrice);
+      const cap = this.options.maxFillQty;
+      const first = cap !== undefined && cap < request.qty ? cap : request.qty;
+      await this.fill(row.id, symbol, request.side, first, executionPrice);
+
+      if (first < request.qty) {
+        // Left 'accepted', not 'filled'. The rest is still working.
+        await this.tx.query(`update paper.orders set status = 'accepted' where id = $1`, [row.id]);
+      }
     }
 
     return { brokerOrderId: row.id, acceptedAt: row.created_at };
+  }
+
+  /**
+   * Fill whatever is still outstanding on an order. The second half of a
+   * partial fill, for exercising the path where fills accumulate.
+   */
+  async fillRemainder(brokerOrderId: string): Promise<Qty> {
+    const order = await this.tx.query<{
+      symbol: string;
+      side: 'buy' | 'sell';
+      qty: string;
+      status: string;
+    }>(`select symbol, side, qty::text as qty, status from paper.orders where id = $1`, [
+      brokerOrderId,
+    ]);
+    const row = order.rows[0];
+    if (!row) throw new Error(`no such paper order: ${brokerOrderId}`);
+
+    const done = await this.tx.query<{ filled: string }>(
+      `select coalesce(sum(qty), 0)::text as filled from paper.fills where order_id = $1`,
+      [brokerOrderId],
+    );
+
+    const outstanding = parseQty(row.qty) - parseQty(done.rows[0]?.filled ?? '0');
+    if (outstanding <= 0n) return 0n;
+
+    const price = this.applyCosts(await this.priceOf(row.symbol), row.side);
+    await this.fill(brokerOrderId, row.symbol, row.side, outstanding, price);
+    await this.tx.query(`update paper.orders set status = 'filled' where id = $1`, [brokerOrderId]);
+
+    return outstanding;
   }
 
   async cancelOrder(brokerOrderId: string): Promise<void> {
@@ -243,20 +272,9 @@ export class PaperBroker implements BrokerAdapter, FundableBroker {
     return null;
   }
 
-  /**
-   * The price moves against you in both directions. That is the whole point.
-   *
-   * The adjustment rounds up, never down. Integer division would truncate and
-   * quietly make trading cheaper than configured, and a simulator that shades
-   * costs in the strategy's favour is how a negative-expectancy idea gets
-   * funded.
-   */
+  /** Shared with the backtester, so the two can never disagree. */
   private applyCosts(midMinor: Minor, side: 'buy' | 'sell'): Minor {
-    const adverseBps = this.costs.spreadBps + this.costs.slippageBps;
-    const numerator = midMinor * adverseBps;
-    const adjustment = numerator === 0n ? 0n : (numerator + BPS - 1n) / BPS;
-    const price = side === 'buy' ? midMinor + adjustment : midMinor - adjustment;
-    return price > 0n ? price : 1n;
+    return executionPrice(midMinor, side, this.costs);
   }
 
   private async fill(
