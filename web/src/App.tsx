@@ -133,6 +133,13 @@ function ControlPanel() {
         );
         return;
       }
+      // 503 means the server recognised its own fault and named it, so the
+      // message stands on its own. 500 is the unrecognised case and says
+      // nothing useful by design.
+      if (status === 503) {
+        setError(e instanceof Error ? e.message : 'the ledger is unavailable');
+        return;
+      }
       if (status >= 500) {
         setError(
           `${e instanceof Error ? e.message : 'the server failed'} — /api/health checks the ` +

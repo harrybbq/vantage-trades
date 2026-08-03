@@ -14,6 +14,7 @@
 import { ValidationError } from '../api/actions.js';
 import * as actions from '../api/actions.js';
 import { inTransaction } from '../db.js';
+import { describeInfrastructureFailure } from './config.js';
 import { controlPanelView } from '../api/view.js';
 import { statsView } from '../api/stats.js';
 
@@ -224,6 +225,20 @@ export async function handle(request: ApiRequest): Promise<ApiResponse> {
     if (isDomainRefusal) return json(409, { error: message });
 
     console.error('control panel request failed:', error);
+
+    // Infrastructure faults are the owner's own deployment facts — an
+    // unreachable host, a missing schema, a refused password. They carry no
+    // ledger data, and withholding them turns a five-minute fix into an
+    // afternoon of reading function logs: "something went wrong" reads
+    // identically whether the database is down or the SQL is broken.
+    //
+    // Everything else stays opaque. An unexpected error is exactly the kind
+    // that might be quoting a row back at you.
+    const infrastructure = describeInfrastructureFailure(error);
+    if (infrastructure) {
+      return json(503, { error: `${infrastructure} See /api/health.` });
+    }
+
     return json(500, { error: 'something went wrong' });
   }
 }

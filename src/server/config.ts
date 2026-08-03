@@ -306,6 +306,50 @@ export function webConfigReport(env: Env = process.env): ConfigReport {
   return report(checkPair(env, 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'));
 }
 
+/**
+ * Name an infrastructure failure, or return null if it is not one.
+ *
+ * Deliberately a fixed set of recognised shapes rather than a pass-through of
+ * the driver's text: each returns wording written here, so nothing the
+ * database says can be forwarded to a browser by accident. The redaction is a
+ * second line of defence, not the first.
+ */
+export function describeInfrastructureFailure(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: unknown } | null)?.code;
+  const codeText = typeof code === 'string' ? code : '';
+
+  if (/no database configured/i.test(message)) {
+    return 'The ledger database is not configured: DATABASE_URL is not set.';
+  }
+  if (/sslmode=require/i.test(message)) {
+    return 'The ledger database URL does not specify sslmode=require, so the connection was refused rather than made in plaintext.';
+  }
+  if (/Dynamic require of/i.test(message)) {
+    return 'The database driver failed to load in this deployment — a bundling fault, not a configuration one.';
+  }
+  if (['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH'].includes(codeText)) {
+    return 'The ledger database could not be reached. Check DATABASE_URL — the direct Supabase host is IPv6-only and unreachable from serverless functions; the transaction pooler is not.';
+  }
+  if (/Tenant or user not found/i.test(message)) {
+    return 'The connection pooler rejected the username. It needs postgres.<project-ref>, not postgres.';
+  }
+  if (codeText === '28P01' || /password authentication failed/i.test(message)) {
+    return 'The ledger database refused the password in DATABASE_URL.';
+  }
+  if (codeText === '3D000') {
+    return 'The database named in DATABASE_URL does not exist.';
+  }
+  if (codeText === '42P01' || /schema "ledger" does not exist/i.test(message)) {
+    return 'The ledger schema is missing from the database DATABASE_URL points at. Run supabase/install.sql against it.';
+  }
+  if (/timeout exceeded when trying to connect/i.test(message)) {
+    return 'Connecting to the ledger database timed out.';
+  }
+
+  return null;
+}
+
 export interface Probe {
   ok: boolean;
   detail: string;

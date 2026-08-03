@@ -10,6 +10,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   inspectKey,
+  describeInfrastructureFailure,
   probeSupabase,
   projectRefFromUrl,
   redact,
@@ -243,6 +244,54 @@ describe('the build-time web check', () => {
       VITE_SUPABASE_ANON_KEY: anonFor('abcdefgh'),
     });
     expect(report.ok).toBe(true);
+  });
+});
+
+describe('naming an infrastructure failure', () => {
+  const pgError = (code: string, message = 'boom') =>
+    Object.assign(new Error(message), { code });
+
+  it('names an unreachable host and points at the pooler', () => {
+    const named = describeInfrastructureFailure(pgError('ECONNREFUSED'));
+    expect(named).toMatch(/could not be reached/);
+    expect(named).toMatch(/IPv6-only/);
+  });
+
+  it('names the driver failing to load, which is a bundling fault', () => {
+    // node-postgres is CommonJS; bundled to ESM its require() throws before
+    // any of our code runs. Distinct from every configuration problem.
+    const named = describeInfrastructureFailure(
+      new Error('Dynamic require of "events" is not supported'),
+    );
+    expect(named).toMatch(/bundling fault/);
+  });
+
+  it('names a refused password without quoting it', () => {
+    const named = describeInfrastructureFailure(pgError('28P01', 'password authentication failed'));
+    expect(named).toMatch(/refused the password/);
+  });
+
+  it('names the pooler username mistake', () => {
+    expect(describeInfrastructureFailure(new Error('Tenant or user not found'))).toMatch(
+      /postgres\.<project-ref>/,
+    );
+  });
+
+  it('names a missing ledger schema', () => {
+    expect(describeInfrastructureFailure(pgError('42P01'))).toMatch(/install\.sql/);
+  });
+
+  it('says nothing about an error it does not recognise', () => {
+    // The fallback has to stay opaque: an unexpected error is the kind that
+    // might be quoting a ledger row back at you.
+    expect(describeInfrastructureFailure(new Error('cannot read property x of undefined'))).toBeNull();
+  });
+
+  it('never forwards the driver text verbatim', () => {
+    const named = describeInfrastructureFailure(
+      pgError('ECONNREFUSED', 'connect ECONNREFUSED postgresql://postgres:hunter2@host:6543/db'),
+    );
+    expect(named).not.toContain('hunter2');
   });
 });
 

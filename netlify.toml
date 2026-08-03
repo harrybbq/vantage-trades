@@ -25,6 +25,17 @@
 [functions]
   node_bundler = "esbuild"
 
+  # node-postgres is CommonJS and calls require() at load time. Bundled into an
+  # ESM output there is no require to call, and the module throws
+  # `Dynamic require of "events" is not supported` before any of our code runs.
+  # Shipping it as a real dependency instead of inlining it avoids the whole
+  # problem. Reproduce with:
+  #
+  #   npx esbuild netlify/functions/control.ts --bundle --platform=node --format=esm
+  #
+  # which fails without this and succeeds with --external:pg.
+  external_node_modules = ["pg"]
+
 # The SPA is one page; every path that is not the API or a built asset should
 # serve it rather than 404.
 [[redirects]]
