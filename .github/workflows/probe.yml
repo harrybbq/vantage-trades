@@ -1,0 +1,72 @@
+name: Probe the deployed site
+
+# Asks the live site how it is, from a runner that can actually reach it.
+#
+# This exists because the deployed site is not reachable from every
+# environment the repository is worked on from, and diagnosing a deployment by
+# asking someone to copy an error out of a browser costs a round trip per
+# guess. Here the answer lands in a log anyone — or anything — with repository
+# access can read.
+#
+# Needs no secrets. /api/health is unauthenticated by design and reports
+# project refs and booleans only; /api/control is expected to refuse.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Site origin to probe'
+        required: false
+        default: 'https://vantagetrader.netlify.app'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The site itself
+        run: |
+          URL="${{ inputs.url }}"
+          echo "probing $URL"
+          code=$(curl -sS -m 30 -o /tmp/index.html -w '%{http_code}' "$URL/" || echo 000)
+          echo "GET /            -> $code"
+          # A 404 here means the build never published, whatever the deploy said.
+          grep -o '<title>[^<]*</title>' /tmp/index.html 2>/dev/null || true
+
+      - name: Configuration self-check
+        run: |
+          URL="${{ inputs.url }}"
+          code=$(curl -sS -m 30 -o /tmp/health.json -w '%{http_code}' "$URL/api/health" || echo 000)
+          echo "GET /api/health  -> $code"
+          echo '--- body ---'
+          # 503 is a legitimate answer here: it means the check ran and something
+          # failed. The body is the diagnosis, so print it either way.
+          jq . /tmp/health.json 2>/dev/null || cat /tmp/health.json
+          echo
+
+      - name: The control API refuses an anonymous caller
+        run: |
+          URL="${{ inputs.url }}"
+          code=$(curl -sS -m 30 -o /tmp/control.json -w '%{http_code}' "$URL/api/control" || echo 000)
+          echo "GET /api/control -> $code"
+          cat /tmp/control.json; echo
+          # Anything other than 401 is worth knowing about. 200 would mean the
+          # owner check is not running, which is the one result that is an
+          # emergency rather than a bug.
+          if [ "$code" = "200" ]; then
+            echo '::error::the control API served an unauthenticated request'
+            exit 1
+          fi
+          if [ "$code" != "401" ]; then
+            echo "::warning::expected 401, got $code"
+          fi
+
+      - name: The report endpoint refuses an anonymous caller
+        run: |
+          URL="${{ inputs.url }}"
+          code=$(curl -sS -m 30 -o /tmp/report.json -w '%{http_code}' "$URL/api/report" || echo 000)
+          echo "GET /api/report  -> $code"
+          cat /tmp/report.json; echo
+          if [ "$code" = "200" ]; then
+            echo '::error::the report endpoint served an untokened request'
+            exit 1
+          fi

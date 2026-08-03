@@ -10,3 +10,6 @@ coverage/
 *.log
 .DS_Store
 .vitest/
+
+# Scratch output from `npm run check:functions`.
+.fn-bundle/

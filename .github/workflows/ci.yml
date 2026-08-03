@@ -61,6 +61,13 @@ jobs:
       - name: Build the control panel
         run: npm run build
 
+      # And the half `npm run build` does not touch. A function can typecheck,
+      # test green and build clean, then fail to load in the deployed bundle.
+      - name: Bundle and run the functions
+        env:
+          AUTH_MODE: insecure-local
+        run: npm run check:functions
+
       # Runs the narrated end-to-end scenarios and prints them into the log,
       # so the system can be watched working without installing anything.
       - name: Demo
