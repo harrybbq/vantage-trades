@@ -42,8 +42,15 @@ export interface ReportView {
   totalEquityMinor: string | null;
   unallocatedMinor: string;
   agents: ReportAgent[];
-  /** Set when the ledger last disagreed with the broker. */
-  reconciliation: { status: string; asOf: string } | null;
+  /**
+   * Always present, never null.
+   *
+   * Vantage reads a missing block as untrustworthy and shows the alarm, so an
+   * absent one and a failed one are indistinguishable to it. `status: "never"`
+   * says which: the job has not run yet, so nothing here has been checked
+   * against the broker. That should alarm — it is simply a different reason.
+   */
+  reconciliation: { status: string; asOf: string | null };
 }
 
 export const TOKEN_HEADER = 'x-vantage-token';
@@ -188,6 +195,8 @@ export async function reportView(tx: Sql, asOf = new Date()): Promise<ReportView
     totalEquityMinor: total?.toString() ?? null,
     unallocatedMinor: pool.toString(),
     agents,
-    reconciliation: last ? { status: last.status, asOf: last.as_of.toISOString() } : null,
+    reconciliation: last
+      ? { status: last.status, asOf: last.as_of.toISOString() }
+      : { status: 'never', asOf: null },
   };
 }

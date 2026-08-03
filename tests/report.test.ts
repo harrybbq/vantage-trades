@@ -16,8 +16,13 @@ import {
   verifyReportToken,
   reportView,
   TOKEN_HEADER,
+  type ReportView,
 } from '../src/api/report.js';
-import { handleReport } from '../src/server/report-handler.js';
+import {
+  handleReport,
+  BUDGET_MS,
+  CALLER_ABORTS_AT_MS,
+} from '../src/server/report-handler.js';
 import { handle } from '../src/server/handler.js';
 import { recordDeposit, allocate } from '../src/ledger/allocation.js';
 import { start } from '../src/ledger/control.js';
@@ -219,5 +224,93 @@ describe('the report token has no power beyond reading', () => {
     expect(status.rows[0]?.status).toBe('running');
 
     process.env['AUTH_MODE'] = 'insecure-local';
+  });
+});
+
+/**
+ * What Vantage's widget requires of this payload, asserted here rather than
+ * agreed in prose. The widget reads a fixed set of fields and renders whatever
+ * arrives, so every one of these is a rendering bug on the other app if it
+ * regresses — and one this repository's tests would otherwise never see.
+ */
+describe('the shape Vantage depends on', () => {
+  it('answers inside the caller\'s abort, with room for two network hops', () => {
+    // Vantage gives up at 8s and reports a timeout. If this budget ever
+    // exceeds that, a slow ledger is reported as this app being unreachable,
+    // and neither side says which of the two ran out of patience.
+    expect(BUDGET_MS).toBeLessThan(CALLER_ABORTS_AT_MS);
+  });
+
+  it('carries a reconciliation block on a refusal', async () => {
+    // A missing block reads as untrustworthy and shows the alarm. Sending one
+    // that says so turns the alarm from an inference into a statement.
+    const result = await handleReport({ method: 'GET', headers: {} });
+    expect(result.status).toBe(401);
+    expect(result.body).toMatchObject({ reconciliation: { status: 'unavailable' } });
+  });
+
+  it('carries a reconciliation block when the method is wrong', async () => {
+    const result = await handleReport({ method: 'POST', headers: {} });
+    expect(result.status).toBe(405);
+    expect(result.body).toHaveProperty('reconciliation');
+  });
+
+  it('never sends reconciliation as null, even before the job has ever run', async () => {
+    const { token } = await inTransaction((tx) => mintReportToken(tx, 'widget', 'owner'));
+    const body = (await handleReport({ method: 'GET', headers: { [TOKEN_HEADER]: token } }))
+      .body as ReportView;
+
+    expect(body.reconciliation).not.toBeNull();
+    expect(body.reconciliation).toEqual({ status: 'never', asOf: null });
+  });
+
+  it('sends every field the widget reads, and no money as a JSON number', async () => {
+    const { token } = await inTransaction((tx) => mintReportToken(tx, 'widget', 'owner'));
+    await inTransaction(async (tx) => {
+      await recordDeposit(tx, parseMoney('5000.00'), new Date(), 'widget-shape');
+      await newAgent(tx, 'momentum-1', 'Momentum');
+      await allocate(tx, 'momentum-1', parseMoney('2000.00'));
+      await start(tx, 'momentum-1', 'owner');
+      await trade(tx, 'momentum-1', 'buy', 'AAPL', '4', '100.00');
+      await setMark(tx, 'AAPL', '110.00');
+    });
+
+    const body = (await handleReport({ method: 'GET', headers: { [TOKEN_HEADER]: token } }))
+      .body as ReportView;
+
+    for (const field of [
+      'currency',
+      'totalEquityMinor',
+      'unallocatedMinor',
+      'asOf',
+      'reconciliation',
+      'agents',
+    ]) {
+      expect(body).toHaveProperty(field);
+    }
+
+    const agent = body.agents[0]!;
+    for (const field of [
+      'id',
+      'name',
+      'status',
+      'equityMinor',
+      'pnlPctSinceStart',
+      'pnlPctToday',
+      'holdings',
+    ]) {
+      expect(agent).toHaveProperty(field);
+    }
+    expect(agent.holdings[0]).toHaveProperty('symbol');
+    expect(agent.holdings[0]).toHaveProperty('qty');
+
+    // Money as integer strings of minor units; percentages as numbers, since
+    // they are already derived, already rounded and display-only.
+    expect(typeof body.unallocatedMinor).toBe('string');
+    expect(typeof body.totalEquityMinor).toBe('string');
+    expect(typeof agent.equityMinor).toBe('string');
+    expect(agent.equityMinor).toMatch(/^-?\d+$/);
+    expect(typeof agent.pnlPctSinceStart).toBe('number');
+    expect(body.currency).toBe('GBP');
   });
 });

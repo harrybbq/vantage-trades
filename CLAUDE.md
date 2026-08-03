@@ -126,7 +126,10 @@ pushes, and Vantage cannot place orders.
 
 Endpoint returns roughly:
 
-`GET /api/report`, header `X-Vantage-Token`. Built; this is a real response:
+`GET /api/report`, header `X-Vantage-Token`. Built; this is a real response.
+`reconciliation` is present on every response including errors, and is never
+`null` — Vantage reads a missing block as untrustworthy and shows the alarm,
+so "never reconciled" says so explicitly rather than by omission:
 
 ```json
 {
