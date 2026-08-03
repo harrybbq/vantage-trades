@@ -208,6 +208,47 @@ export function redact(text: string): string {
  *   and rejects the plain form with "Tenant or user not found", which reads
  *   like a missing database.
  */
+/**
+ * Why a connection string would not parse — without quoting any of it back.
+ *
+ * There are only a few ways to get this wrong, and they are worth naming
+ * individually because "not a valid URL" sends you looking at the host when
+ * the problem is a `#` in the password. The password characters that break
+ * parsing are exactly the ones a generated password is likely to contain, and
+ * nothing in the Supabase dashboard warns you that it needs encoding.
+ */
+function whyUnparseable(raw: string): string {
+  if (/^psql\b/i.test(raw)) {
+    return 'it starts with "psql". Paste the URI on its own, not the whole command.';
+  }
+  if (/^["']|["']$/.test(raw)) {
+    return 'it is wrapped in quotes. Paste the URI without them.';
+  }
+
+  // Everything after the last @ is the host; before it, the credentials.
+  const credentials = raw.slice(0, raw.lastIndexOf('@'));
+  const offender = ['#', '/', '?', '[', ']'].find((char) => credentials.slice(11).includes(char));
+  if (offender) {
+    const encoded: Record<string, string> = {
+      '#': '%23',
+      '/': '%2F',
+      '?': '%3F',
+      '[': '%5B',
+      ']': '%5D',
+    };
+    return (
+      `the password contains "${offender}", which has to be percent-encoded as ` +
+      `"${encoded[offender]}". Everything else in the string can stay as it is.`
+    );
+  }
+
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    return 'it does not start with postgresql:// or postgres://.';
+  }
+
+  return 'the scheme, credentials or host are malformed.';
+}
+
 function checkDatabaseUrl(env: Env): Check[] {
   const raw = env['DATABASE_URL']?.trim() || env['NETLIFY_DATABASE_URL']?.trim();
   if (!raw) return [{ name: 'DATABASE_URL', ok: false, detail: 'not set' }];
@@ -216,7 +257,7 @@ function checkDatabaseUrl(env: Env): Check[] {
   try {
     parsed = new URL(raw);
   } catch {
-    return [{ name: 'DATABASE_URL', ok: false, detail: 'set, but not a valid URL' }];
+    return [{ name: 'DATABASE_URL', ok: false, detail: `set, but unparseable — ${whyUnparseable(raw)}` }];
   }
 
   const host = parsed.hostname;

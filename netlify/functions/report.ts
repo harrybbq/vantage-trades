@@ -15,7 +15,25 @@ export default async function report(request: Request): Promise<Response> {
     headers[key.toLowerCase()] = value;
   });
 
-  const result = await handleReport({ method: request.method, headers });
+  // An uncaught throw here does not reach the caller as a 500 — the platform
+  // returns 502 "error decoding lambda response", which names neither the
+  // endpoint nor the cause. Vantage's widget would show that as an outage of
+  // itself rather than of this app.
+  //
+  // The reason is deliberately withheld. This endpoint is reachable by anyone
+  // and its token check needs the database, so a failure before authentication
+  // means there is no way to know who is asking. /api/health is the place that
+  // explains itself, and it does so by choice.
+  let result;
+  try {
+    result = await handleReport({ method: request.method, headers });
+  } catch (error) {
+    console.error('report request failed:', error);
+    return Response.json(
+      { error: 'unavailable' },
+      { status: 503, headers: { 'cache-control': 'no-store' } },
+    );
+  }
 
   return new Response(serialise(result.body), {
     status: result.status,

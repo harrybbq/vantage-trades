@@ -207,6 +207,36 @@ describe('the server report', () => {
     );
   });
 
+  it('names the character that broke the connection string', () => {
+    // A generated Supabase password containing "#" truncates the URI at the
+    // fragment and makes new URL() throw. Nothing warns you it needs encoding,
+    // and "not a valid URL" sends you looking at the host instead.
+    const report = serverConfigReport({
+      ...good,
+      DATABASE_URL: 'postgresql://postgres.abc:pa#ss@aws-0.pooler.supabase.com:6543/postgres',
+    });
+    const detail = report.checks.find((c) => c.name === 'DATABASE_URL')?.detail ?? '';
+    expect(detail).toMatch(/percent-encoded/);
+    expect(detail).toMatch(/%23/);
+    expect(detail).not.toContain('pa#ss');
+  });
+
+  it('spots the whole psql command being pasted', () => {
+    const report = serverConfigReport({
+      ...good,
+      DATABASE_URL: 'psql postgresql://postgres:pw@host:6543/postgres',
+    });
+    expect(report.checks.find((c) => c.name === 'DATABASE_URL')?.detail).toMatch(/starts with "psql"/);
+  });
+
+  it('spots surrounding quotes', () => {
+    const report = serverConfigReport({
+      ...good,
+      DATABASE_URL: '"postgresql://postgres:pw@host:6543/postgres"',
+    });
+    expect(report.checks.find((c) => c.name === 'DATABASE_URL')?.detail).toMatch(/wrapped in quotes/);
+  });
+
   it('flags AUTH_MODE being set at all', () => {
     const report = serverConfigReport({ ...good, AUTH_MODE: 'insecure-local' });
     expect(failed(report)).toContain('AUTH_MODE');
