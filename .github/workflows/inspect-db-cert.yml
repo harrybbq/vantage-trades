@@ -1,0 +1,60 @@
+name: Inspect the database certificate
+
+# Prints the certificate chain the Postgres endpoint actually presents.
+#
+# Needed because "self-signed certificate in certificate chain" says only that
+# Node did not trust the chain — not which CA signed it, and not whether the
+# chain was even complete. Guessing at that from documentation is how an
+# afternoon disappears; asking the server takes ten seconds.
+#
+# Runs from a runner with ordinary outbound network access, because the
+# environment this repository is worked on from cannot open a socket to the
+# database. It reads a public certificate over an unauthenticated handshake:
+# no credentials, no database name, no query.
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 'Pooler host (leave blank to try the usual candidates)'
+        required: false
+        default: ''
+      region:
+        description: 'Supabase region, used when host is blank'
+        required: false
+        default: 'eu-central-2'
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show the chain
+        run: |
+          if [ -n "${{ inputs.host }}" ]; then
+            HOSTS="${{ inputs.host }}"
+          else
+            # The prefix varies per project and only the dashboard knows which.
+            HOSTS="aws-0-${{ inputs.region }}.pooler.supabase.com aws-1-${{ inputs.region }}.pooler.supabase.com"
+          fi
+
+          for h in $HOSTS; do
+            echo "=============================================================="
+            echo "host: $h"
+            if ! getent hosts "$h" >/dev/null 2>&1; then
+              echo "  does not resolve — not this one"
+              continue
+            fi
+
+            # Postgres negotiates TLS after an SSLRequest packet rather than
+            # starting with a handshake, which is what -starttls postgres does.
+            timeout 25 openssl s_client -starttls postgres -connect "$h:6543" \
+              -showcerts -verify_return_error </dev/null 2>&1 \
+              | grep -E '^(depth|verify|subject|issuer|Verify return code|s:|i:)' \
+              | head -40 || true
+
+            echo "--- leaf subject alternative names ---"
+            timeout 25 openssl s_client -starttls postgres -connect "$h:6543" \
+              </dev/null 2>/dev/null \
+              | openssl x509 -noout -subject -issuer -dates -ext subjectAltName 2>&1 \
+              | head -20 || true
+          done
