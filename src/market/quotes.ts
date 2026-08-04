@@ -140,15 +140,29 @@ async function fetchOne(
     };
   }
 
-  if (!response.ok) {
-    return { symbol, reason: `the feed answered ${response.status}` };
-  }
+  // Read the body whatever the status. This provider puts the useful part —
+  // "symbol not found", "exchange not found", "plan does not include this" —
+  // in a JSON body served alongside a 404, so returning the status code alone
+  // throws away the only sentence that says what to change.
+  const text = await response.text().catch(() => '');
 
   let body: QuoteResponse;
   try {
-    body = (await response.json()) as QuoteResponse;
+    body = JSON.parse(text) as QuoteResponse;
   } catch {
-    return { symbol, reason: 'the feed did not return JSON' };
+    return {
+      symbol,
+      reason: response.ok
+        ? 'the feed did not return JSON'
+        : `the feed answered ${response.status}: ${text.slice(0, 160)}`,
+    };
+  }
+
+  if (!response.ok) {
+    return {
+      symbol,
+      reason: `the feed answered ${response.status}${body.message ? `: ${body.message}` : ''}`,
+    };
   }
 
   // Twelve Data reports failures as a 200 with status:"error", so a bare

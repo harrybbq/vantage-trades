@@ -165,6 +165,37 @@ describe('fetching', () => {
     expect(rejected[0]?.reason).toMatch(/could not be fetched/);
   });
 
+  it('quotes the reason from a body served with an error status', async () => {
+    // This provider answers "symbol not found" and "your plan does not cover
+    // this exchange" with a 404 and a JSON body. The status code alone says
+    // only that something was missing, which is the least useful half.
+    const fake = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 404, message: '**symbol** not found: VWRP. Please specify a valid symbol', status: 'error' }),
+        { status: 404 },
+      ),
+    );
+    const { quotes, rejected } = await fetchQuotes(
+      ['VWRP'],
+      fake as unknown as typeof fetch,
+      undefined,
+      KEY,
+    );
+    expect(quotes).toEqual([]);
+    expect(rejected[0]?.reason).toContain('not found: VWRP');
+  });
+
+  it('still reports an error status with no usable body', async () => {
+    const fake = vi.fn().mockResolvedValue(new Response('<html>gateway</html>', { status: 502 }));
+    const { rejected } = await fetchQuotes(
+      ['VWRP'],
+      fake as unknown as typeof fetch,
+      undefined,
+      KEY,
+    );
+    expect(rejected[0]?.reason).toContain('502');
+  });
+
   it('survives a reply that is not the shape it should be', async () => {
     for (const body of ['not json', '{}', '{"close":"1"}', '{"currency":"GBP"}']) {
       const fake = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
