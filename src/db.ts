@@ -85,6 +85,61 @@ export function sslFor(url: string): { ca: string; rejectUnauthorized: true } | 
   return { ca: SUPABASE_ROOT_CA, rejectUnauthorized: true };
 }
 
+/**
+ * Remove `sslmode` from a connection string, leaving everything else alone.
+ *
+ * Only the query part is touched — the userinfo is not reserialised, because
+ * re-encoding a password is a good way to break authentication for reasons
+ * that look nothing like the change that caused them.
+ */
+function withoutSslmode(url: string): string {
+  const at = url.indexOf('?');
+  if (at < 0) return url;
+
+  const params = url
+    .slice(at + 1)
+    .split('&')
+    .filter((param) => !/^sslmode=/i.test(param));
+
+  return params.length ? `${url.slice(0, at)}?${params.join('&')}` : url.slice(0, at);
+}
+
+/**
+ * The pool configuration for a connection string.
+ *
+ * Split out from `getPool` so it can be asserted against a real `pg.Client`,
+ * because the subtlety here is entirely in what the driver does with it:
+ *
+ *   new pg.Client({ connectionString: '…?sslmode=require', ssl: { ca } })
+ *   → client.connectionParameters.ssl === {}
+ *
+ * `pg` merges the parsed connection string *over* the explicit config, so
+ * `sslmode=require` replaces the whole `ssl` object with an empty one — TLS
+ * still happens, the CA is silently discarded, and verification then fails
+ * against a chain there is no longer anything to verify it with. The error is
+ * identical whether the CA was wrong or thrown away, which is what made this
+ * cost an evening.
+ *
+ * So `sslmode` is stripped before the string reaches the driver, and the TLS
+ * settings are passed as the only source of truth. The operator's string is
+ * still required to declare it — that check is about knowing a given deploy
+ * was encrypted, and it has not moved.
+ */
+export function poolConfig(url: string): pg.PoolConfig {
+  const ssl = sslFor(url);
+
+  return {
+    connectionString: ssl ? withoutSslmode(url) : url,
+    ...(ssl ? { ssl } : {}),
+    // One connection per invocation in serverless: each cold start gets its
+    // own process, so a large pool multiplies by the number of concurrent
+    // invocations and exhausts the database's connection limit.
+    max: isServerless() ? 1 : 8,
+    idleTimeoutMillis: isServerless() ? 1_000 : 10_000,
+    connectionTimeoutMillis: 10_000,
+  };
+}
+
 export function getPool(): pg.Pool {
   if (!pool) {
     const url = resolveConnectionString();
@@ -101,17 +156,7 @@ export function getPool(): pg.Pool {
       );
     }
 
-    pool = new pg.Pool({
-      connectionString: url,
-      // Supplied explicitly, and only for Supabase hosts. See sslFor().
-      ...(sslFor(url) ? { ssl: sslFor(url) } : {}),
-      // One connection per invocation in serverless: each cold start gets its
-      // own process, so a large pool multiplies by the number of concurrent
-      // invocations and exhausts the database's connection limit.
-      max: isServerless() ? 1 : 8,
-      idleTimeoutMillis: isServerless() ? 1_000 : 10_000,
-      connectionTimeoutMillis: 10_000,
-    });
+    pool = new pg.Pool(poolConfig(url));
   }
   return pool;
 }

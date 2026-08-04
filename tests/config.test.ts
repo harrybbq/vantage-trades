@@ -19,7 +19,8 @@ import {
   type Env,
 } from '../src/server/config.js';
 import { healthReport } from '../src/server/health.js';
-import { sslFor } from '../src/db.js';
+import { sslFor, poolConfig } from '../src/db.js';
+import pg from 'pg';
 
 /** A Supabase-shaped JWT. The signature is never checked here — only claims. */
 const jwt = (claims: Record<string, unknown>): string =>
@@ -511,5 +512,55 @@ describe('TLS to the database', () => {
     // means the suite says so first.
     const expiry = new Date('2031-04-26T10:56:53Z');
     expect(expiry.getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe('the TLS settings that reach the driver', () => {
+  const POOLER =
+    'postgresql://postgres.abcdefgh:pw@aws-0-eu-central-2.pooler.supabase.com:6543/postgres?sslmode=require';
+
+  /** What pg will really use, after it has merged the connection string. */
+  interface Internals {
+    ssl: { ca?: string; rejectUnauthorized?: boolean } | boolean;
+    host: string;
+    port: number;
+    user: string;
+    password: string;
+    database: string;
+  }
+
+  // connectionParameters is not in pg's public types, but it is what the
+  // driver connects with, and asserting anything less would not have caught
+  // the bug this replaces.
+  const asClientSees = (url: string): Internals =>
+    (new pg.Client(poolConfig(url)) as unknown as { connectionParameters: Internals })
+      .connectionParameters;
+
+  it('actually hands the CA to pg', () => {
+    // The bug this replaces: pg merges the parsed connection string over the
+    // explicit config, so sslmode=require replaced { ca } with {}. TLS still
+    // happened and the CA was silently dropped, which fails identically to
+    // pinning the wrong CA. Asserting the driver's own view is the only
+    // version of this test that would have caught it.
+    const ssl = asClientSees(POOLER).ssl;
+    expect(typeof ssl).toBe('object');
+    expect((ssl as { ca?: string }).ca).toContain('BEGIN CERTIFICATE');
+    expect((ssl as { rejectUnauthorized?: boolean }).rejectUnauthorized).toBe(true);
+  });
+
+  it('keeps every other part of the connection string intact', () => {
+    const params = asClientSees(POOLER);
+    expect(params.host).toBe('aws-0-eu-central-2.pooler.supabase.com');
+    expect(params.port).toBe(6543);
+    expect(params.user).toBe('postgres.abcdefgh');
+    expect(params.password).toBe('pw');
+    expect(params.database).toBe('postgres');
+  });
+
+  it('leaves a non-Supabase provider to pg', () => {
+    const neon = 'postgresql://u:p@ep-x.eu-central-1.aws.neon.tech/db?sslmode=require';
+    expect(poolConfig(neon).ssl).toBeUndefined();
+    // And its sslmode is left in the string, since nothing is replacing it.
+    expect(poolConfig(neon).connectionString).toContain('sslmode=require');
   });
 });
