@@ -117,6 +117,7 @@ describe('the server report', () => {
     SUPABASE_ANON_KEY: anonFor('abcdefgh'),
     OWNER_USER_ID: OWNER,
     DATABASE_URL: 'postgresql://u:p@host:6543/postgres?sslmode=require',
+    MARKET_DATA_API_KEY: 'a-key',
   };
 
   it('passes a correct configuration', () => {
@@ -267,6 +268,14 @@ describe('the server report', () => {
     expect(report.checks.find((c) => c.name === 'DATABASE_URL')?.detail).toMatch(/wrapped in quotes/);
   });
 
+  it('flags a deployment that can never price anything', () => {
+    // The panel still works without it, but nothing can be valued: equity
+    // stays unknown and the benchmark cannot be drawn. Degraded, not working.
+    const { MARKET_DATA_API_KEY: _none, ...rest } = good;
+    const report = serverConfigReport(rest);
+    expect(failed(report)).toContain('MARKET_DATA_API_KEY');
+  });
+
   it('flags AUTH_MODE being set at all', () => {
     const report = serverConfigReport({ ...good, AUTH_MODE: 'insecure-local' });
     expect(failed(report)).toContain('AUTH_MODE');
@@ -393,6 +402,7 @@ describe('the health report', () => {
     SUPABASE_ANON_KEY: anonFor('abcdefgh'),
     OWNER_USER_ID: OWNER,
     DATABASE_URL: 'postgresql://u:p@host:6543/postgres?sslmode=require',
+    MARKET_DATA_API_KEY: 'a-key',
   } as NodeJS.ProcessEnv;
 
   const accepts = () =>

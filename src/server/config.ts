@@ -365,6 +365,20 @@ export function serverConfigReport(env: Env = process.env): ConfigReport {
 
   checks.push(...checkDatabaseUrl(env));
 
+  // Not fatal to the panel, which loads and lets you allocate capital without
+  // it — but nothing can be *valued* without prices. Equity stays unknown, no
+  // strategy can form a view, and the benchmark cannot be drawn. A deployment
+  // in that state is degraded rather than working, and this says so.
+  const marketKey = env['MARKET_DATA_API_KEY']?.trim();
+  checks.push({
+    name: 'MARKET_DATA_API_KEY',
+    ok: Boolean(marketKey),
+    detail: marketKey
+      ? 'set'
+      : 'not set, so nothing will ever be priced — holdings stay unvalued and the ' +
+        'benchmark cannot be drawn',
+  });
+
   // Never legitimately set on a deployed site. The handler already refuses to
   // honour it there, but a deployment that has it set at all is a deployment
   // somebody tried to unlock, and that is worth saying out loud.

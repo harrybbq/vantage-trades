@@ -204,6 +204,12 @@ export async function healthReport(
         'transaction mode, and append ?sslmode=require.',
     );
   }
+  if (failed.includes('MARKET_DATA_API_KEY')) {
+    advice.push(
+      'Without a market data key nothing is priced, so agents cannot act and the ' +
+        'equity curve has no benchmark drawn on it. See docs/DEPLOY.md.',
+    );
+  }
   if (failed.includes('ledger schema')) {
     advice.push('Run supabase/install.sql against the database DATABASE_URL points at.');
   }
