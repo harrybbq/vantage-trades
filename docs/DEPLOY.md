@@ -110,6 +110,7 @@ Set these in the Netlify UI. Never in a file, never in a commit.
 | `VITE_SUPABASE_URL` | the same URL again, for the sign-in screen |
 | `VITE_SUPABASE_ANON_KEY` | the same anon key again, for the sign-in screen |
 | `BENCHMARK_SYMBOL` | optional, defaults to `VWRP` |
+| `MARKET_DATA_API_KEY` | a Twelve Data key. Without it nothing is priced — see below |
 
 **The two `VITE_` ones are deliberate and safe.** A Supabase project URL and
 its anon key are designed to be public — the anon key identifies the project
@@ -234,6 +235,25 @@ The fastest confirmation of which project the site is actually talking to is
 the Supabase dashboard: **Logs → API**. If your site's requests are not there
 at all, its compiled-in URL points somewhere else.
 
+### Prices need a key, and that is not laziness
+
+The keyless price endpoints that serve a browser refuse server traffic:
+Yahoo answers **429** from a datacenter address and Stooq **404**. Netlify's
+functions run from exactly such an address, so a keyless feed would have
+priced nothing in production while working perfectly on a laptop.
+
+So `MARKET_DATA_API_KEY` is required, and without it the price job fetches
+nothing and says so. It does not fall back to another source and it never
+invents a mark — an unpriced holding shows as unpriced everywhere, which is
+recoverable, while a wrong price is invisible and is not.
+
+[Twelve Data](https://twelvedata.com/pricing) has a free tier that covers a
+handful of symbols at daily-or-slower frequency, which is what this system
+needs. It also returns the currency explicitly, which matters more than it
+sounds: London quotes some instruments in pounds and others in pence, and the
+code refuses anything it cannot identify rather than guessing at a factor of
+one hundred.
+
 ### Scheduled jobs
 
 Two scheduled functions ship with the site. Netlify picks them up from their
@@ -243,6 +263,7 @@ Two scheduled functions ship with the site. Netlify picks them up from their
 |---|---|---|
 | `reconcile-scheduled` | 22:37 UTC, weekdays | The mandatory daily reconciliation, then the equity snapshot |
 | `agents-scheduled` | hourly 14:00–20:00 UTC, weekdays | Ticks every running agent — **off unless `AGENTS_ENABLED=true`** |
+| `prices-scheduled` | hourly 08:00–17:00 UTC and once at 22:00, weekdays | Refreshes marks from the market data provider |
 
 `agents-scheduled` is the only thing in the codebase that can place an order
 with no human present, so it ships switched off and stays that way until that

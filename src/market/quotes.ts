@@ -39,16 +39,29 @@ export interface FeedResult {
 }
 
 /**
- * The feed's name for a symbol.
+ * The feed's name for a symbol, and the venue it trades on.
  *
  * The ledger holds bare tickers because that is what the owner types and what
- * a broker will eventually want. This appends the London suffix, since the
- * ledger is sterling and an instrument priced in pounds is on the LSE by
- * definition. A symbol that already carries a suffix is passed through, so a
- * different venue can be named explicitly when one is ever needed.
+ * a broker will eventually want. London is assumed, since the ledger is
+ * sterling. A symbol written `TICKER.VENUE` names its venue explicitly, for
+ * the day one of them is not on the LSE.
  */
-export function feedSymbol(symbol: string): string {
-  return symbol.includes('.') ? symbol : `${symbol}.L`;
+export function feedSymbol(symbol: string): { symbol: string; exchange: string } {
+  const [ticker = symbol, venue] = symbol.split('.');
+  return { symbol: ticker.toUpperCase(), exchange: (venue ?? 'LSE').toUpperCase() };
+}
+
+/**
+ * The key for the market data provider.
+ *
+ * There is deliberately no fallback and no default source. The keyless
+ * endpoints that serve a browser — Yahoo, Stooq — refuse datacenter traffic
+ * with 429 and 404 respectively, so a "free" feed here would be one that
+ * silently priced nothing in production while looking fine in development.
+ * Better to require the key and do nothing without it.
+ */
+export function apiKey(): string | undefined {
+  return process.env['MARKET_DATA_API_KEY']?.trim() || undefined;
 }
 
 /**
@@ -87,18 +100,13 @@ export function toPence(price: number, currency: string): bigint | string {
   }
 }
 
-interface ChartResponse {
-  chart?: {
-    result?: {
-      meta?: {
-        regularMarketPrice?: number;
-        currency?: string;
-        regularMarketTime?: number;
-        symbol?: string;
-      };
-    }[];
-    error?: { description?: string } | null;
-  };
+/** Twelve Data's quote shape, plus the error shape it uses instead. */
+interface QuoteResponse {
+  close?: string;
+  currency?: string;
+  timestamp?: number;
+  status?: string;
+  message?: string;
 }
 
 /**
@@ -110,10 +118,14 @@ interface ChartResponse {
  */
 async function fetchOne(
   symbol: string,
+  key: string,
   fetchImpl: typeof fetch,
   now: () => Date,
 ): Promise<FeedQuote | RejectedQuote> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(feedSymbol(symbol))}?interval=1d&range=1d`;
+  const { symbol: ticker, exchange } = feedSymbol(symbol);
+  const url =
+    `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(ticker)}` +
+    `&exchange=${encodeURIComponent(exchange)}&apikey=${encodeURIComponent(key)}`;
 
   let response: Response;
   try {
@@ -122,38 +134,42 @@ async function fetchOne(
       signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
-    return { symbol, reason: `could not be fetched: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      symbol,
+      reason: `could not be fetched: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 
   if (!response.ok) {
     return { symbol, reason: `the feed answered ${response.status}` };
   }
 
-  let body: ChartResponse;
+  let body: QuoteResponse;
   try {
-    body = (await response.json()) as ChartResponse;
+    body = (await response.json()) as QuoteResponse;
   } catch {
     return { symbol, reason: 'the feed did not return JSON' };
   }
 
-  const meta = body.chart?.result?.[0]?.meta;
-  if (!meta) {
-    return { symbol, reason: body.chart?.error?.description ?? 'no result for this symbol' };
+  // Twelve Data reports failures as a 200 with status:"error", so a bare
+  // status check would read a rate-limit notice as a price.
+  if (body.status === 'error') {
+    return { symbol, reason: body.message ?? 'the feed reported an error' };
   }
 
-  const { regularMarketPrice: price, currency } = meta;
-  if (typeof price !== 'number' || typeof currency !== 'string') {
+  const { close, currency } = body;
+  if (typeof close !== 'string' || typeof currency !== 'string') {
     return { symbol, reason: 'the feed returned no price or no currency' };
   }
 
+  const price = Number(close);
   const pence = toPence(price, currency);
   if (typeof pence === 'string') return { symbol, reason: pence };
 
   // The feed's own timestamp where it has one. A quote stamped with the moment
   // it was fetched claims to be fresher than it is, and staleness is exactly
   // what a mark needs to be honest about.
-  const asOf =
-    typeof meta.regularMarketTime === 'number' ? new Date(meta.regularMarketTime * 1000) : now();
+  const asOf = typeof body.timestamp === 'number' ? new Date(body.timestamp * 1000) : now();
 
   return { symbol: symbol.toUpperCase(), priceMinor: pence, asOf };
 }
@@ -164,8 +180,21 @@ export async function fetchQuotes(
   symbols: readonly string[],
   fetchImpl: typeof fetch = fetch,
   now: () => Date = () => new Date(),
+  key = apiKey(),
 ): Promise<FeedResult> {
-  const settled = await Promise.all(symbols.map((symbol) => fetchOne(symbol, fetchImpl, now)));
+  if (!key) {
+    // Not an error worth throwing: an unconfigured feed is a state the owner
+    // can be in on purpose. It must not be a state that quietly invents marks.
+    return {
+      quotes: [],
+      rejected: symbols.map((symbol) => ({
+        symbol,
+        reason: 'no market data provider configured (set MARKET_DATA_API_KEY)',
+      })),
+    };
+  }
+
+  const settled = await Promise.all(symbols.map((symbol) => fetchOne(symbol, key, fetchImpl, now)));
 
   return {
     quotes: settled.filter(isQuote),

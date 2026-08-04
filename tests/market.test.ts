@@ -15,16 +15,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { toPence, feedSymbol, fetchQuotes } from '../src/market/quotes.js';
 
+const KEY = 'test-key';
+
 /** A response shaped like the feed's. */
 const chart = (price: unknown, currency: unknown, time?: number) =>
-  new Response(
-    JSON.stringify({
-      chart: {
-        result: [{ meta: { regularMarketPrice: price, currency, regularMarketTime: time } }],
-      },
-    }),
-    { status: 200 },
-  );
+  new Response(JSON.stringify({ close: price, currency, timestamp: time }), { status: 200 });
 
 describe('turning a quote into pence', () => {
   it('reads pounds as pounds', () => {
@@ -70,20 +65,36 @@ describe('turning a quote into pence', () => {
 
 describe('naming a symbol for the feed', () => {
   it('assumes London, because the ledger is sterling', () => {
-    expect(feedSymbol('VWRP')).toBe('VWRP.L');
-    expect(feedSymbol('HSBA')).toBe('HSBA.L');
+    expect(feedSymbol('VWRP')).toEqual({ symbol: 'VWRP', exchange: 'LSE' });
+    expect(feedSymbol('HSBA')).toEqual({ symbol: 'HSBA', exchange: 'LSE' });
   });
 
-  it('leaves an explicit venue alone', () => {
-    expect(feedSymbol('VWRP.L')).toBe('VWRP.L');
-    expect(feedSymbol('AAPL.US')).toBe('AAPL.US');
+  it('honours an explicit venue', () => {
+    expect(feedSymbol('VWRP.LSE')).toEqual({ symbol: 'VWRP', exchange: 'LSE' });
+    expect(feedSymbol('AAPL.NASDAQ')).toEqual({ symbol: 'AAPL', exchange: 'NASDAQ' });
+  });
+});
+
+describe('without a provider key', () => {
+  it('prices nothing and says why, rather than inventing a mark', async () => {
+    const fake = vi.fn();
+    const { quotes, rejected } = await fetchQuotes(
+      ['VWRP'],
+      fake as unknown as typeof fetch,
+      undefined,
+      undefined,
+    );
+
+    expect(fake).not.toHaveBeenCalled();
+    expect(quotes).toEqual([]);
+    expect(rejected[0]?.reason).toMatch(/MARKET_DATA_API_KEY/);
   });
 });
 
 describe('fetching', () => {
   it('returns a quote in minor units', async () => {
-    const fake = vi.fn().mockResolvedValue(chart(102.34, 'GBP', 1_785_000_000));
-    const { quotes, rejected } = await fetchQuotes(['VWRP'], fake as unknown as typeof fetch);
+    const fake = vi.fn().mockResolvedValue(chart('102.34', 'GBP', 1_785_000_000));
+    const { quotes, rejected } = await fetchQuotes(['VWRP'], fake as unknown as typeof fetch, undefined, KEY);
 
     expect(rejected).toEqual([]);
     expect(quotes).toHaveLength(1);
@@ -94,14 +105,34 @@ describe('fetching', () => {
   });
 
   it('asks the feed for the London listing', async () => {
-    const fake = vi.fn().mockResolvedValue(chart(1, 'GBP'));
-    await fetchQuotes(['VWRP'], fake as unknown as typeof fetch);
-    expect(String(fake.mock.calls[0]?.[0])).toContain('VWRP.L');
+    const fake = vi.fn().mockResolvedValue(chart('1', 'GBP'));
+    await fetchQuotes(['VWRP'], fake as unknown as typeof fetch, undefined, KEY);
+    const url = String(fake.mock.calls[0]?.[0]);
+    expect(url).toContain('symbol=VWRP');
+    expect(url).toContain('exchange=LSE');
+  });
+
+  it('reads an error reported as a 200, rather than as a price', async () => {
+    // The provider answers rate limits and bad symbols with HTTP 200 and
+    // status:"error". Trusting the status code alone would store the notice.
+    const fake = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'error', message: 'API credits exceeded' }), {
+        status: 200,
+      }),
+    );
+    const { quotes, rejected } = await fetchQuotes(
+      ['VWRP'],
+      fake as unknown as typeof fetch,
+      undefined,
+      KEY,
+    );
+    expect(quotes).toEqual([]);
+    expect(rejected[0]?.reason).toMatch(/credits exceeded/);
   });
 
   it('rejects a dollar-quoted instrument and prices nothing', async () => {
-    const fake = vi.fn().mockResolvedValue(chart(210.5, 'USD'));
-    const { quotes, rejected } = await fetchQuotes(['SPY'], fake as unknown as typeof fetch);
+    const fake = vi.fn().mockResolvedValue(chart('210.5', 'USD'));
+    const { quotes, rejected } = await fetchQuotes(['SPY'], fake as unknown as typeof fetch, undefined, KEY);
 
     expect(quotes).toEqual([]);
     expect(rejected[0]?.reason).toMatch(/sterling/);
@@ -112,12 +143,14 @@ describe('fetching', () => {
     // symbol must not cost the rest their prices.
     const fake = vi
       .fn()
-      .mockResolvedValueOnce(chart(102.34, 'GBP'))
+      .mockResolvedValueOnce(chart('102.34', 'GBP'))
       .mockResolvedValueOnce(new Response('nope', { status: 404 }));
 
     const { quotes, rejected } = await fetchQuotes(
       ['VWRP', 'NOSUCH'],
       fake as unknown as typeof fetch,
+      undefined,
+      KEY,
     );
 
     expect(quotes.map((q) => q.symbol)).toEqual(['VWRP']);
@@ -126,16 +159,21 @@ describe('fetching', () => {
 
   it('survives the feed being unreachable', async () => {
     const fake = vi.fn().mockRejectedValue(new Error('getaddrinfo ENOTFOUND'));
-    const { quotes, rejected } = await fetchQuotes(['VWRP'], fake as unknown as typeof fetch);
+    const { quotes, rejected } = await fetchQuotes(['VWRP'], fake as unknown as typeof fetch, undefined, KEY);
 
     expect(quotes).toEqual([]);
     expect(rejected[0]?.reason).toMatch(/could not be fetched/);
   });
 
   it('survives a reply that is not the shape it should be', async () => {
-    for (const body of ['not json', '{}', '{"chart":{"result":[]}}', '{"chart":{"result":[{}]}}']) {
+    for (const body of ['not json', '{}', '{"close":"1"}', '{"currency":"GBP"}']) {
       const fake = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
-      const { quotes, rejected } = await fetchQuotes(['VWRP'], fake as unknown as typeof fetch);
+      const { quotes, rejected } = await fetchQuotes(
+        ['VWRP'],
+        fake as unknown as typeof fetch,
+        undefined,
+        KEY,
+      );
       expect(quotes).toEqual([]);
       expect(rejected).toHaveLength(1);
     }
@@ -144,8 +182,8 @@ describe('fetching', () => {
   it('refuses a quote with a price but no currency', async () => {
     // The dangerous shape: a plausible number with nothing saying what it
     // means. Guessing sterling here is exactly the 100× mistake.
-    const fake = vi.fn().mockResolvedValue(chart(645, undefined));
-    const { quotes, rejected } = await fetchQuotes(['HSBA'], fake as unknown as typeof fetch);
+    const fake = vi.fn().mockResolvedValue(chart('645', undefined));
+    const { quotes, rejected } = await fetchQuotes(['HSBA'], fake as unknown as typeof fetch, undefined, KEY);
 
     expect(quotes).toEqual([]);
     expect(rejected[0]?.reason).toMatch(/no price or no currency/);
