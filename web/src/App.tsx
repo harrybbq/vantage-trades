@@ -25,15 +25,31 @@ type Dialog =
   | { kind: 'funds' }
   | null;
 
-function Reconciliation({ view }: { view: ControlPanelView }) {
+function Reconciliation({
+  view,
+  busy,
+  onCheck,
+}: {
+  view: ControlPanelView;
+  busy: boolean;
+  onCheck: () => void;
+}) {
   const recon = view.reconciliation;
+
+  // Checking talks to the feed and the broker before it answers, so it takes
+  // seconds. Saying so beats a button that looks stuck.
+  const check = (
+    <button className="btn-sm" onClick={onCheck} disabled={busy} title="Reconcile now">
+      {busy ? 'Checking…' : 'Check now'}
+    </button>
+  );
 
   if (!recon) {
     return (
       <div className="recon none">
         <span className="dot" />
         <span className="txt">Never reconciled</span>
-        <span className="meta">run the daily job</span>
+        {check}
       </div>
     );
   }
@@ -51,6 +67,7 @@ function Reconciliation({ view }: { view: ControlPanelView }) {
         <span className="dot" />
         <span className="txt">Reconciled clean</span>
         <span className="meta">{when}</span>
+        {check}
       </div>
     );
   }
@@ -62,6 +79,7 @@ function Reconciliation({ view }: { view: ControlPanelView }) {
       <span className="dot" />
       <span className="txt">Ledger diverged — investigate today</span>
       <span className="meta">{when}</span>
+      {check}
     </div>
   );
 }
@@ -216,7 +234,11 @@ function ControlPanel() {
           </div>
         </div>
         <div className="topbar-right">
-          <Reconciliation view={view} />
+          <Reconciliation
+            view={view}
+            busy={busy}
+            onCheck={() => void run(() => api.reconcileNow())}
+          />
           {authConfigured && (
             <button className="btn-sm" onClick={() => void signOut()}>
               Sign out

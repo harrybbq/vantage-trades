@@ -138,6 +138,15 @@ export const fetchStats = (): Promise<StatsView> =>
 const post = <T>(body: Record<string, unknown>): Promise<T> =>
   request<T>({ method: 'POST', body: JSON.stringify(body) });
 
+/**
+ * Run the reconciliation now.
+ *
+ * Slower than every other call here — it talks to the price feed and the
+ * broker before it answers — so callers should expect seconds, not the
+ * milliseconds the rest of these take.
+ */
+export const reconcileNow = () => post<ControlPanelView>({ action: 'reconcileNow' });
+
 export const createAgent = (id: string, name: string) =>
   post<ControlPanelView>({ action: 'createAgent', id, name });
 

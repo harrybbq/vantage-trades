@@ -181,6 +181,8 @@ export async function handle(request: ApiRequest): Promise<ApiResponse> {
       // request to authenticate and one place to add an action.
       case 'stats':
         return json(200, await inTransaction((tx) => statsView(tx)));
+      case 'reconcileNow':
+        return json(200, await actions.doReconcileNow(body as never, actor));
       case 'recordDeposit':
         return json(200, await actions.doRecordDeposit(body as never, actor));
       case 'recordWithdrawal':

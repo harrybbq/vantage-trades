@@ -10,7 +10,7 @@
  * failure is a clear message rather than a raised Postgres exception.
  */
 
-import { inTransaction } from '../db.js';
+import { inTransaction, getPool } from '../db.js';
 import { formatQty, parseMoney, type Minor } from '../money.js';
 import { createAgent } from '../ledger/agents.js';
 import { allocate, deallocate, recordDeposit, recordWithdrawal } from '../ledger/allocation.js';
@@ -19,6 +19,8 @@ import { addToUniverse, removeFromUniverse } from '../ledger/universe.js';
 import { controlPanelView, type ControlPanelView } from './view.js';
 import { PaperBroker } from '../broker/paper.js';
 import { usingPaperBroker } from '../broker/config.js';
+import { runDailyReconcile } from '../jobs/daily-reconcile.js';
+import { refreshPrices } from '../market/feed.js';
 
 export class ValidationError extends Error {}
 
@@ -137,6 +139,34 @@ export async function doRecordWithdrawal(
 
     return controlPanelView(tx);
   });
+}
+
+/**
+ * Run the reconciliation now, rather than waiting for tonight.
+ *
+ * Safe to expose as a button: it places no orders and moves no capital. It
+ * pulls fills, prices what is held, asserts that the agents' equities plus the
+ * unallocated pool equal the broker's own figure, and records the answer.
+ *
+ * Worth having beyond impatience. After fixing a divergence you need to know
+ * whether the fix worked, and "wait until tomorrow night" is long enough that
+ * the next divergence can arrive before the last one is confirmed cured.
+ *
+ * Prices are refreshed first. Reconciling against yesterday's marks compares
+ * today's positions with stale valuations, which produces a difference that
+ * looks like a divergence and is not one — the exact false alarm this system
+ * cannot afford.
+ */
+export async function doReconcileNow(
+  _input: Record<string, unknown>,
+  _actor: string,
+): Promise<ControlPanelView> {
+  await refreshPrices();
+  await runDailyReconcile(new PaperBroker(getPool()));
+
+  // Whatever it decided is now the newest row, and the view reads it back —
+  // so the panel shows the result rather than this function's opinion of it.
+  return inTransaction((tx) => controlPanelView(tx));
 }
 
 export async function doAllocate(

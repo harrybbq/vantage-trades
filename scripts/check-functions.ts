@@ -22,7 +22,14 @@ import { readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const FUNCTIONS = ['control', 'report', 'health', 'reconcile-scheduled', 'agents-scheduled'];
+const FUNCTIONS = [
+  'control',
+  'report',
+  'health',
+  'reconcile-scheduled',
+  'agents-scheduled',
+  'prices-scheduled',
+];
 
 /**
  * The `external_node_modules` list, read from the deployment config itself.

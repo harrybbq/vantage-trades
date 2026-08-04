@@ -1,0 +1,55 @@
+name: Check the price feed
+
+# Asks the feed what it would say, from a runner with ordinary network access.
+#
+# Two things worth knowing and neither is guessable: whether the endpoint still
+# answers, and what currency each symbol is quoted in. London quotes some
+# instruments in pounds and others in pence, and the difference is a factor of
+# a hundred. The code refuses anything that is not sterling, so a surprise here
+# shows up as a missing price rather than a wrong one — but a missing price is
+# still a stopped agent, and this says so before the schedule does.
+#
+# No secrets. Public market data, read anonymously.
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: 'Space-separated, without the .L suffix'
+        required: false
+        default: 'VWRP VUSA HSBA SHEL'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: What the feed says
+        run: |
+          for s in ${{ inputs.symbols }}; do
+            url="https://query1.finance.yahoo.com/v8/finance/chart/$s.L?interval=1d&range=1d"
+            body=$(curl -sS -m 20 -H 'accept: application/json' "$url" || echo '')
+
+            printf '%-8s ' "$s"
+            echo "$body" | python3 -c '
+import json, sys
+try:
+    meta = json.load(sys.stdin)["chart"]["result"][0]["meta"]
+except Exception:
+    print("no usable reply from the feed")
+    sys.exit()
+
+price, currency = meta.get("regularMarketPrice"), meta.get("currency")
+
+# The same arithmetic the app does, so this shows the number that would
+# actually be stored rather than the one the feed printed.
+if currency == "GBP":
+    pence = round(float(f"{price * 100:.6f}"))
+elif currency in ("GBp", "GBX"):
+    pence = round(float(f"{price:.6f}"))
+else:
+    print(f"price={price} currency={currency}  REFUSED — not sterling")
+    sys.exit()
+
+print(f"price={price} currency={currency}  -> {pence} pence  (£{pence / 100:.2f})")
+'
+          done
