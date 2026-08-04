@@ -9,6 +9,7 @@
  */
 
 import pg from 'pg';
+import { SUPABASE_ROOT_CA } from './supabase-ca.js';
 
 // node-postgres hands back int8 as a string by default to avoid precision loss.
 // We want bigint, and we want it everywhere, so it is set once here rather than
@@ -52,6 +53,38 @@ export function resolveConnectionString(): string {
   );
 }
 
+/** Supabase's own hosts — the database, the pooler, and nothing else. */
+const SUPABASE_HOST = /(^|\.)supabase\.(co|com)$/i;
+
+/**
+ * TLS settings for a Supabase connection, or undefined to leave it to pg.
+ *
+ * Postgres at Supabase presents a certificate signed by Supabase's own root
+ * CA, which Node does not trust, so `sslmode=require` alone fails with
+ * "self-signed certificate in certificate chain". The usual fix found in
+ * examples is `rejectUnauthorized: false`, which keeps the encryption and
+ * throws away the identity check — the connection is then private from
+ * eavesdroppers but not proof against something answering in the database's
+ * place. For a link carrying a brokerage ledger, that is the wrong trade when
+ * the alternative is shipping one public certificate.
+ *
+ * So the CA is supplied and verification stays on, including the hostname
+ * check. Only for Supabase hosts: anything else keeps pg's own handling, so a
+ * different provider is unaffected by a certificate that has nothing to do
+ * with it.
+ */
+export function sslFor(url: string): { ca: string; rejectUnauthorized: true } | undefined {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
+  if (!SUPABASE_HOST.test(host)) return undefined;
+
+  return { ca: SUPABASE_ROOT_CA, rejectUnauthorized: true };
+}
+
 export function getPool(): pg.Pool {
   if (!pool) {
     const url = resolveConnectionString();
@@ -70,6 +103,8 @@ export function getPool(): pg.Pool {
 
     pool = new pg.Pool({
       connectionString: url,
+      // Supplied explicitly, and only for Supabase hosts. See sslFor().
+      ...(sslFor(url) ? { ssl: sslFor(url) } : {}),
       // One connection per invocation in serverless: each cold start gets its
       // own process, so a large pool multiplies by the number of concurrent
       // invocations and exhausts the database's connection limit.

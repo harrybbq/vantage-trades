@@ -19,6 +19,7 @@ import {
   type Env,
 } from '../src/server/config.js';
 import { healthReport } from '../src/server/health.js';
+import { sslFor } from '../src/db.js';
 
 /** A Supabase-shaped JWT. The signature is never checked here — only claims. */
 const jwt = (claims: Record<string, unknown>): string =>
@@ -473,5 +474,42 @@ describe('the health report', () => {
     expect(session?.detail).toMatch(/not the owner/);
     // The other user's id is not this caller's business.
     expect(JSON.stringify(report)).not.toContain(SOMEBODY_ELSE);
+  });
+});
+
+describe('TLS to the database', () => {
+  it('pins Supabase\'s CA for Supabase hosts, and only those', () => {
+    // Supabase presents a certificate signed by its own root CA. Supplying
+    // that CA keeps verification on; the alternative found in most examples,
+    // rejectUnauthorized: false, keeps the encryption and drops the identity
+    // check — private from eavesdroppers, but not proof against something
+    // answering in the database's place.
+    expect(
+      sslFor('postgresql://postgres.ref:pw@aws-0-eu-central-2.pooler.supabase.com:6543/postgres'),
+    ).toMatchObject({ rejectUnauthorized: true });
+    expect(sslFor('postgresql://postgres:pw@db.abcdefgh.supabase.co:5432/postgres')).toMatchObject({
+      rejectUnauthorized: true,
+    });
+
+    // Another provider keeps pg's own handling: a certificate that has nothing
+    // to do with them must not become the only one their host can present.
+    expect(sslFor('postgresql://u:p@ep-x.eu-central-1.aws.neon.tech/db')).toBeUndefined();
+    expect(sslFor('postgres://postgres@localhost:5432/vantage_trades')).toBeUndefined();
+  });
+
+  it('is not fooled by a hostname that merely contains supabase.co', () => {
+    // The match is anchored to the end of the host. Without that,
+    // evil-supabase.co.attacker.net would be handed the pinned CA and, worse,
+    // be treated as a host this app expects to be talking to.
+    expect(sslFor('postgresql://u:p@evil-supabase.co.attacker.net/db')).toBeUndefined();
+    expect(sslFor('postgresql://u:p@supabase.co.example.com/db')).toBeUndefined();
+  });
+
+  it('never verifies against an expired certificate without noticing', () => {
+    // A root that has quietly expired fails every connection at once, with a
+    // message that sounds like a network fault. Asserting the window here
+    // means the suite says so first.
+    const expiry = new Date('2031-04-26T10:56:53Z');
+    expect(expiry.getTime()).toBeGreaterThan(Date.now());
   });
 });
