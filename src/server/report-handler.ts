@@ -67,7 +67,7 @@ async function withDeadline<T>(ms: number, fn: () => Promise<T>): Promise<T> {
  * one that says "unavailable" turns the same alarm from an inference into a
  * statement, and costs nothing: it names no agent, no figure and no caller.
  */
-const unavailable = (status: number, error: string): ReportResponse => ({
+export const unavailable = (status: number, error: string): ReportResponse => ({
   status,
   body: { error, reconciliation: { status: 'unavailable', asOf: null } },
 });
@@ -97,6 +97,17 @@ export async function handleReport(request: ReportRequest): Promise<ReportRespon
     if (error instanceof DeadlineExceeded) {
       return unavailable(503, 'the ledger did not answer within the budget');
     }
-    throw error;
+
+    // Everything else is answered here rather than rethrown. Letting it escape
+    // put the contract in the hands of whichever adapter happened to catch it
+    // — and the adapter's own reply carried no reconciliation block, so the
+    // single most likely failure in production, the ledger being unreachable,
+    // was the one response that broke the rule this file exists to keep.
+    //
+    // No detail. This endpoint is publicly reachable and its token check needs
+    // the database, so a failure before authentication means there is no way
+    // to know who is asking. /api/health is the surface that explains itself.
+    console.error('report request failed:', error);
+    return unavailable(503, 'unavailable');
   }
 }

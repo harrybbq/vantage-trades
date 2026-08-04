@@ -6,7 +6,7 @@
  * token can never reach an action that moves money.
  */
 
-import { handleReport } from '../../src/server/report-handler.js';
+import { handleReport, unavailable } from '../../src/server/report-handler.js';
 import { serialise } from '../../src/server/handler.js';
 
 export default async function report(request: Request): Promise<Response> {
@@ -28,11 +28,12 @@ export default async function report(request: Request): Promise<Response> {
   try {
     result = await handleReport({ method: request.method, headers });
   } catch (error) {
-    console.error('report request failed:', error);
-    return Response.json(
-      { error: 'unavailable' },
-      { status: 503, headers: { 'cache-control': 'no-store' } },
-    );
+    // handleReport answers its own failures; reaching here means one escaped
+    // it. The reply still has to carry a reconciliation block, so it is built
+    // by the same function rather than written out again — the version written
+    // out again is the one that was missing it.
+    console.error('report request failed before the handler could answer:', error);
+    result = unavailable(503, 'unavailable');
   }
 
   return new Response(serialise(result.body), {

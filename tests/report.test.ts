@@ -249,6 +249,27 @@ describe('the shape Vantage depends on', () => {
     expect(result.body).toMatchObject({ reconciliation: { status: 'unavailable' } });
   });
 
+  it('carries a reconciliation block when the ledger itself is unreachable', async () => {
+    // The likeliest failure in production, and the one that was breaking the
+    // rule: the handler used to rethrow, leaving the reply to whichever
+    // adapter caught it, and the adapter's reply had no reconciliation block.
+    await closePool();
+    const was = process.env['DATABASE_URL'];
+    process.env['DATABASE_URL'] = 'postgres://postgres@127.0.0.1:5999/nowhere';
+
+    try {
+      const result = await handleReport({ method: 'GET', headers: { [TOKEN_HEADER]: 'x'.repeat(40) } });
+      expect(result.status).toBe(503);
+      expect(result.body).toMatchObject({ reconciliation: { status: 'unavailable' } });
+      // Nothing about the database reaches a caller who has not authenticated.
+      expect(JSON.stringify(result.body)).not.toMatch(/5999|postgres|ECONNREFUSED/);
+    } finally {
+      if (was === undefined) delete process.env['DATABASE_URL'];
+      else process.env['DATABASE_URL'] = was;
+      await closePool();
+    }
+  });
+
   it('carries a reconciliation block when the method is wrong', async () => {
     const result = await handleReport({ method: 'POST', headers: {} });
     expect(result.status).toBe(405);
