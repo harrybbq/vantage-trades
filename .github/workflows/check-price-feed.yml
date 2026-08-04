@@ -1,13 +1,13 @@
 name: Check the price feed
 
-# Asks the feed what it would say, from a runner with ordinary network access.
+# Asks each candidate source what it would say, from a runner with ordinary
+# network access.
 #
-# Two things worth knowing and neither is guessable: whether the endpoint still
-# answers, and what currency each symbol is quoted in. London quotes some
-# instruments in pounds and others in pence, and the difference is a factor of
-# a hundred. The code refuses anything that is not sterling, so a surprise here
-# shows up as a missing price rather than a wrong one — but a missing price is
-# still a stopped agent, and this says so before the schedule does.
+# Two things worth knowing and neither is guessable from a development
+# machine: whether a source answers *from datacenter infrastructure* — several
+# consumer finance APIs serve browsers happily and refuse servers — and what
+# currency each symbol comes back in. London quotes some instruments in pounds
+# and others in pence, and the difference is a factor of a hundred.
 #
 # No secrets. Public market data, read anonymously.
 
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       symbols:
-        description: 'Space-separated, without the .L suffix'
+        description: 'Space-separated, without a venue suffix'
         required: false
         default: 'VWRP VUSA HSBA SHEL'
 
@@ -23,24 +23,29 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: What the feed says
+      - name: Yahoo
         run: |
           for s in ${{ inputs.symbols }}; do
             url="https://query1.finance.yahoo.com/v8/finance/chart/$s.L?interval=1d&range=1d"
-            body=$(curl -sS -m 20 -H 'accept: application/json' "$url" || echo '')
-
-            # The same arithmetic the app does, so this prints the number that
-            # would actually be stored rather than the one the feed printed.
-            echo "$body" | jq -r --arg s "$s" '
-              (.chart.result[0].meta // empty) as $m
-              | if $m == null then "\($s): no usable reply from the feed"
-                elif ($m.regularMarketPrice | type) != "number" then "\($s): no price"
-                elif $m.currency == "GBP" then
-                  "\($s): \($m.regularMarketPrice) GBP -> \(($m.regularMarketPrice * 100) | round) pence"
-                elif ($m.currency == "GBp" or $m.currency == "GBX") then
-                  "\($s): \($m.regularMarketPrice) \($m.currency) -> \($m.regularMarketPrice | round) pence"
-                else
-                  "\($s): \($m.regularMarketPrice) \($m.currency) -> REFUSED, not sterling"
-                end
-            ' 2>/dev/null || echo "$s: no usable reply from the feed"
+            code=$(curl -sS -m 20 -o /tmp/y.json -w '%{http_code}' -H 'accept: application/json' "$url" || echo 000)
+            echo "--- $s  http=$code"
+            head -c 200 /tmp/y.json; echo
           done
+
+      - name: Stooq
+        run: |
+          for s in ${{ inputs.symbols }}; do
+            # Stooq names the London listing with a .uk suffix and answers CSV.
+            url="https://stooq.com/q/l/?s=$(echo "$s" | tr 'A-Z' 'a-z').uk&f=sd2t2ohlcv&h&e=csv"
+            code=$(curl -sS -m 20 -o /tmp/s.csv -w '%{http_code}' "$url" || echo 000)
+            echo "--- $s  http=$code"
+            cat /tmp/s.csv
+          done
+
+      - name: What those numbers imply
+        run: |
+          # Stooq does not say which currency it used, so the scale has to be
+          # inferred from the magnitude — which is exactly the guess this
+          # codebase refuses to make. Printed here only to judge the source.
+          echo "VWRP is roughly £120-135 and HSBA roughly 600-1100 pence."
+          echo "A source quoting HSBA near 9 is using pounds; near 900, pence."
