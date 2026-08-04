@@ -56,6 +56,29 @@ export class PaperBroker implements BrokerAdapter, FundableBroker {
   }
 
   /**
+   * The other half of the simulated transfer.
+   *
+   * Refuses to overdraw. A real brokerage will not let you withdraw cash that
+   * is tied up in positions, and a simulator that would is a simulator that
+   * lets you prove a withdrawal works when it would not have.
+   */
+  async withdrawFunds(amountMinor: Minor): Promise<void> {
+    if (amountMinor <= 0n) throw new Error('a withdrawal must be positive');
+
+    const available = await this.cashMinor();
+    if (amountMinor > available) {
+      throw new Error(
+        `the brokerage account holds ${available} in cash, which is less than the ` +
+          `${amountMinor} being withdrawn — sell positions first`,
+      );
+    }
+
+    await this.tx.query(`update paper.account set cash_minor = cash_minor - $1`, [
+      amountMinor.toString(),
+    ]);
+  }
+
+  /**
    * `asOf` lets a simulation drive the quote clock. It is the timestamp the
    * mark is stored under, so a backtest produces one bar per simulated day
    * rather than a pile of bars all stamped with the wall-clock moment the

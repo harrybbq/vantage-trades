@@ -234,6 +234,26 @@ The fastest confirmation of which project the site is actually talking to is
 the Supabase dashboard: **Logs → API**. If your site's requests are not there
 at all, its compiled-in URL points somewhere else.
 
+### Scheduled jobs
+
+Two scheduled functions ship with the site. Netlify picks them up from their
+`config.schedule` export; nothing needs configuring for them to start.
+
+| Function | When | What it does |
+|---|---|---|
+| `reconcile-scheduled` | 22:37 UTC, weekdays | The mandatory daily reconciliation, then the equity snapshot |
+| `agents-scheduled` | hourly 14:00–20:00 UTC, weekdays | Ticks every running agent — **off unless `AGENTS_ENABLED=true`** |
+
+`agents-scheduled` is the only thing in the codebase that can place an order
+with no human present, so it ships switched off and stays that way until that
+variable is set. Deploying it off is deliberate: the schedule and its failure
+modes get exercised while the worst outcome is a log line.
+
+Reconciliation answers non-2xx on divergence, so a bad day shows as a failed
+run rather than a successful one that logged a disaster. Until it has run at
+least once, `/api/report` reports `reconciliation: {"status":"never"}` and
+Vantage shows the alarm — correctly, because nothing has been checked.
+
 ## 4. The report token for Vantage
 
 Mint it against the deployed database, not your local one:

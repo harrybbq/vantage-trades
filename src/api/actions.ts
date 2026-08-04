@@ -17,6 +17,8 @@ import { allocate, deallocate, recordDeposit, recordWithdrawal } from '../ledger
 import { halt, start, globalHalt, previewKill, standDown, type KillPreview } from '../ledger/control.js';
 import { addToUniverse, removeFromUniverse } from '../ledger/universe.js';
 import { controlPanelView, type ControlPanelView } from './view.js';
+import { PaperBroker } from '../broker/paper.js';
+import { usingPaperBroker } from '../broker/config.js';
 
 export class ValidationError extends Error {}
 
@@ -93,6 +95,21 @@ export async function doRecordDeposit(
 
   return inTransaction(async (tx) => {
     await recordDeposit(tx, amount, new Date(), `deposit:${reference}`);
+
+    // In paper mode the bank transfer is simulated too, so the simulator has
+    // to be told the cash arrived. Nothing else will tell it: there is no real
+    // bank on the other end. Without this the very first thing the owner does
+    // — record cash in — makes the ledger diverge from the broker by exactly
+    // that amount, and the app's loudest alarm fires over its own missing
+    // wiring. A false alarm on day one is how you learn to ignore the real one.
+    //
+    // Against a real broker this must not happen: the money moved at the bank
+    // and the broker already knows. Same transaction either way, so the ledger
+    // and the simulator cannot end up disagreeing through a partial failure.
+    if (usingPaperBroker()) {
+      await new PaperBroker(tx).fundAccount(amount);
+    }
+
     return controlPanelView(tx);
   });
 }
@@ -110,6 +127,14 @@ export async function doRecordWithdrawal(
 
   return inTransaction(async (tx) => {
     await recordWithdrawal(tx, amount, new Date(), `withdrawal:${reference}`);
+
+    // The mirror of the deposit path. The simulator refuses to overdraw, so
+    // withdrawing cash that is tied up in positions fails here rather than
+    // producing a paper account the ledger cannot be reconciled against.
+    if (usingPaperBroker()) {
+      await new PaperBroker(tx).withdrawFunds(amount);
+    }
+
     return controlPanelView(tx);
   });
 }
