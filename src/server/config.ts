@@ -249,6 +249,50 @@ function whyUnparseable(raw: string): string {
   return 'the scheme, credentials or host are malformed.';
 }
 
+/**
+ * Show the connection string with the password removed.
+ *
+ * Only ever reported when the string is already known to be wrong, and only
+ * from parsed components — so it is assembled rather than echoed, and a
+ * password cannot survive by hiding in a part this does not rebuild.
+ *
+ * Nothing here is secret. The host and project ref are public, `postgres.<ref>`
+ * is the documented pooler username, and the port and query string are fixed
+ * by Supabase. The password is the only sensitive part and it never appears.
+ *
+ * This exists because "check the value in your dashboard" and "the value the
+ * function is reading" turned out to be different things, with no way to see
+ * the second. The length is included because the failure it would not
+ * otherwise reveal is a paste into a field that was not cleared first, which
+ * looks perfectly normal in a password-masked input.
+ */
+function masked(raw: string, parsed: URL): Check {
+  const port = parsed.port || '(none)';
+  const auth = parsed.username ? `${decodeURIComponent(parsed.username)}:***@` : '';
+
+  // Whitelist rather than mask. Removing the password from the userinfo is not
+  // enough: a second connection string pasted after the first — into a field
+  // that was not cleared, which a masked input makes invisible — lands in the
+  // path, password and all. That is a case this check exists to catch, so it
+  // must not be the case that publishes a credential.
+  //
+  // Anything that is not a plain database name or an ordinary query string is
+  // therefore described rather than shown.
+  const safe = (value: string, pattern: RegExp, label: string): string =>
+    pattern.test(value) ? value : `${label}`;
+
+  const path = safe(parsed.pathname, /^\/[A-Za-z0-9_-]{0,63}$/, '/(unexpected content — not shown)');
+  const query = safe(parsed.search, /^(\?[A-Za-z0-9=&_.-]{0,80})?$/, '?(unexpected content — not shown)');
+
+  return {
+    name: 'DATABASE_URL (password removed)',
+    ok: false,
+    detail:
+      `${parsed.protocol}//${auth}${parsed.hostname}:${port}${path}${query}` +
+      ` — ${raw.length} characters in total`,
+  };
+}
+
 function checkDatabaseUrl(env: Env): Check[] {
   const raw = env['DATABASE_URL']?.trim() || env['NETLIFY_DATABASE_URL']?.trim();
   if (!raw) return [{ name: 'DATABASE_URL', ok: false, detail: 'not set' }];
@@ -281,6 +325,7 @@ function checkDatabaseUrl(env: Env): Check[] {
           'serverless functions usually cannot reach it. Use the transaction pooler ' +
           'URI from Settings → Database instead — host …pooler.supabase.com, port 6543.',
       },
+      masked(raw, parsed),
     ];
   }
 

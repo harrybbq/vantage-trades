@@ -189,6 +189,34 @@ describe('the server report', () => {
     expect(failed(report)).toEqual([]);
   });
 
+  it('shows the wrong string with the password removed', () => {
+    // "The value in the dashboard" and "the value the function reads" turned
+    // out to be different things, with no way to see the second.
+    const report = serverConfigReport({
+      ...good,
+      DATABASE_URL: 'postgresql://postgres:hunter2@db.abcdefgh.supabase.co:5432/postgres?sslmode=require',
+    });
+    const shown = report.checks.find((c) => c.name === 'DATABASE_URL (password removed)')?.detail;
+    expect(shown).toContain('postgres:***@db.abcdefgh.supabase.co:5432');
+    expect(shown).toContain('characters in total');
+  });
+
+  it('does not publish a password hiding in the path', () => {
+    // A second connection string pasted after the first — into a field that
+    // was not cleared, which a masked input makes invisible. The password ends
+    // up in the path, so removing it from the userinfo is not enough.
+    const doubled =
+      'postgresql://postgres:hunter2@db.abcdefgh.supabase.co:5432/postgres' +
+      'postgresql://postgres.abcdefgh:hunter2@aws-0.pooler.supabase.com:6543/postgres?sslmode=require';
+    const report = serverConfigReport({ ...good, DATABASE_URL: doubled });
+
+    expect(JSON.stringify(report)).not.toContain('hunter2');
+    // But it still says the length, which is what reveals the doubling.
+    expect(
+      report.checks.find((c) => c.name === 'DATABASE_URL (password removed)')?.detail,
+    ).toContain(`${doubled.length} characters`);
+  });
+
   it('never echoes the password, whatever it decides', () => {
     for (const url of [
       'postgresql://postgres:hunter2@db.abcdefgh.supabase.co:5432/postgres?sslmode=require',
