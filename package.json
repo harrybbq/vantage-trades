@@ -18,6 +18,7 @@
     "dev:web": "vite",
     "build": "tsx scripts/check-web-env.ts && vite build",
     "check:functions": "tsx scripts/check-functions.ts",
+    "check:workflows": "node scripts/check-workflows.mjs",
     "job:agents": "tsx src/jobs/run-agents.ts",
     "demo:agent": "tsx src/jobs/agent-demo.ts",
     "demo:research": "tsx src/jobs/research-demo.ts",

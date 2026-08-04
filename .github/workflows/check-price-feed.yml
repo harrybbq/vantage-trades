@@ -29,27 +29,18 @@ jobs:
             url="https://query1.finance.yahoo.com/v8/finance/chart/$s.L?interval=1d&range=1d"
             body=$(curl -sS -m 20 -H 'accept: application/json' "$url" || echo '')
 
-            printf '%-8s ' "$s"
-            echo "$body" | python3 -c '
-import json, sys
-try:
-    meta = json.load(sys.stdin)["chart"]["result"][0]["meta"]
-except Exception:
-    print("no usable reply from the feed")
-    sys.exit()
-
-price, currency = meta.get("regularMarketPrice"), meta.get("currency")
-
-# The same arithmetic the app does, so this shows the number that would
-# actually be stored rather than the one the feed printed.
-if currency == "GBP":
-    pence = round(float(f"{price * 100:.6f}"))
-elif currency in ("GBp", "GBX"):
-    pence = round(float(f"{price:.6f}"))
-else:
-    print(f"price={price} currency={currency}  REFUSED — not sterling")
-    sys.exit()
-
-print(f"price={price} currency={currency}  -> {pence} pence  (£{pence / 100:.2f})")
-'
+            # The same arithmetic the app does, so this prints the number that
+            # would actually be stored rather than the one the feed printed.
+            echo "$body" | jq -r --arg s "$s" '
+              (.chart.result[0].meta // empty) as $m
+              | if $m == null then "\($s): no usable reply from the feed"
+                elif ($m.regularMarketPrice | type) != "number" then "\($s): no price"
+                elif $m.currency == "GBP" then
+                  "\($s): \($m.regularMarketPrice) GBP -> \(($m.regularMarketPrice * 100) | round) pence"
+                elif ($m.currency == "GBp" or $m.currency == "GBX") then
+                  "\($s): \($m.regularMarketPrice) \($m.currency) -> \($m.regularMarketPrice | round) pence"
+                else
+                  "\($s): \($m.regularMarketPrice) \($m.currency) -> REFUSED, not sterling"
+                end
+            ' 2>/dev/null || echo "$s: no usable reply from the feed"
           done

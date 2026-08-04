@@ -51,6 +51,11 @@ jobs:
             psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -f "$migration"
           done
 
+      # A workflow whose YAML does not parse is not a failing workflow, it is
+      # an absent one — GitHub declines to register it and says nothing.
+      - name: Check the workflow files
+        run: npm run check:workflows
+
       - name: Typecheck
         run: npm run typecheck
 
