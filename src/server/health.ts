@@ -176,6 +176,18 @@ export async function healthReport(
         'alone does not update a running function.',
     );
   }
+  if (failed.includes('SUPABASE_ANON_KEY')) {
+    // There are two variables one letter apart in meaning and six in name, and
+    // fixing the wrong one looks identical to fixing nothing. Only the server's
+    // is visible from here — the browser's is compiled into the bundle — so
+    // this check cannot tell you which one you edited. Name both.
+    advice.push(
+      'SUPABASE_ANON_KEY and VITE_SUPABASE_ANON_KEY are different variables and ' +
+        'both need the same publishable key. This check can only see the first: ' +
+        'the VITE_ one is compiled into the browser bundle at build time. ' +
+        'Correcting one and not the other looks exactly like correcting neither.',
+    );
+  }
   if (failed.includes('OWNER_USER_ID')) {
     advice.push(
       'OWNER_USER_ID is the owner\'s user id from Authentication → Users in Supabase, ' +

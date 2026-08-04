@@ -393,6 +393,19 @@ describe('the health report', () => {
     expect(report.advice.join(' ')).toMatch(/build time/);
   });
 
+  it('names both anon-key variables when the server one is wrong', async () => {
+    // Fixing VITE_SUPABASE_ANON_KEY and not SUPABASE_ANON_KEY produces a
+    // report identical to fixing neither, and this endpoint can only see the
+    // second. Saying so is the difference between one round trip and three.
+    const report = await healthReport(
+      {},
+      { ...env, SUPABASE_ANON_KEY: 'sb_secret_nope' },
+      accepts() as unknown as typeof fetch,
+      dbOk,
+    );
+    expect(report.advice.join(' ')).toMatch(/VITE_SUPABASE_ANON_KEY/);
+  });
+
   it('says nothing about a caller who presented no token', async () => {
     const report = await healthReport({}, env, accepts() as unknown as typeof fetch, dbOk);
     expect(report.checks.map((c) => c.name)).not.toContain('your session');
