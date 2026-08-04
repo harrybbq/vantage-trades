@@ -18,9 +18,18 @@
   # deploy that succeeded, and each corrected environment variable appears to
   # change nothing at all. That failure mode is why this line exists.
   #
-  # Only ever list VITE_ variables here. Exempting a real secret would turn
-  # off the check that stops it being published.
-  SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY"
+  # SUPABASE_URL and SUPABASE_ANON_KEY are listed for the same reason at one
+  # remove: they hold the *same values* as the two VITE_ variables, because
+  # the browser and the server talk to the same project with the same public
+  # key. The scanner matches on value, so it finds them in the bundle under
+  # their non-VITE_ names and fails the build — even though the only copy in
+  # the output was put there deliberately by the VITE_ ones.
+  #
+  # This costs nothing: the identical strings are already exempt under the
+  # other two names, so listing these hides no value that was not public
+  # anyway. It is not a licence to add more. Anything whose value is not
+  # already compiled into the bundle on purpose does not belong here.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_URL,VITE_SUPABASE_ANON_KEY,SUPABASE_URL,SUPABASE_ANON_KEY"
 
 [functions]
   node_bundler = "esbuild"
