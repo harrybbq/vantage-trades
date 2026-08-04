@@ -16,6 +16,8 @@
 import { projectRefFromUrl, probeSupabase, redact, serverConfigReport } from './config.js';
 import type { Check } from './config.js';
 import { getPool } from '../db.js';
+import { fetchQuotes, apiKey } from '../market/quotes.js';
+import { benchmarkSymbol } from '../ledger/snapshots.js';
 
 export interface HealthReport {
   ok: boolean;
@@ -132,11 +134,52 @@ async function checkDatabase(): Promise<Check[]> {
   }
 }
 
+/**
+ * Ask the market data provider for one quote, and report what came back.
+ *
+ * Opt-in, because it spends an API credit and this endpoint is public. One
+ * symbol, and only when asked for — a health check that quietly burns a
+ * rate-limited quota on every hit is a health check that eventually causes
+ * the outage it is meant to detect.
+ *
+ * The provider's own message is passed through, since a rejection is usually
+ * specific ("symbol not found", "credits exceeded") and paraphrasing it loses
+ * the only useful part. Run through the key redactor first: a provider that
+ * echoes the request back would otherwise publish the key on a public URL.
+ */
+async function checkMarketData(fetchImpl: typeof fetch, env: NodeJS.ProcessEnv): Promise<Check> {
+  const symbol = benchmarkSymbol();
+  // Taken from the env this report was given rather than the ambient process,
+  // so the check tests the configuration being described.
+  const key = env['MARKET_DATA_API_KEY']?.trim() || apiKey();
+
+  const { quotes, rejected } = await fetchQuotes([symbol], fetchImpl, undefined, key);
+  const quote = quotes[0];
+
+  if (quote) {
+    const pounds = (Number(quote.priceMinor) / 100).toFixed(2);
+    return {
+      name: 'market data',
+      ok: true,
+      detail: `${symbol} priced at ${quote.priceMinor} pence (£${pounds}) as of ${quote.asOf.toISOString()}`,
+    };
+  }
+
+  const reason = rejected[0]?.reason ?? 'no answer';
+  return {
+    name: 'market data',
+    ok: false,
+    // Never echo the key, whatever the provider said.
+    detail: key ? reason.split(key).join('<key>') : reason,
+  };
+}
+
 export async function healthReport(
   headers: Record<string, string | undefined> = {},
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
   probeDatabase: () => Promise<Check[]> = checkDatabase,
+  probeFeed = false,
 ): Promise<HealthReport> {
   const config = serverConfigReport(env);
   const checks = [...config.checks];
@@ -165,6 +208,10 @@ export async function healthReport(
   // driver error says less than the check above already did.
   if (checks.find((check) => check.name === 'DATABASE_URL')?.ok) {
     checks.push(...(await probeDatabase()));
+  }
+
+  if (probeFeed) {
+    checks.push(await checkMarketData(fetchImpl, env));
   }
 
   const failed = checks.filter((check) => !check.ok).map((check) => check.name);
@@ -208,6 +255,12 @@ export async function healthReport(
     advice.push(
       'Without a market data key nothing is priced, so agents cannot act and the ' +
         'equity curve has no benchmark drawn on it. See docs/DEPLOY.md.',
+    );
+  }
+  if (failed.includes('market data')) {
+    advice.push(
+      'The provider refused. Its reason is quoted above — a symbol it does not ' +
+        'recognise, an exchange code it spells differently, or a quota already spent.',
     );
   }
   if (failed.includes('ledger schema')) {

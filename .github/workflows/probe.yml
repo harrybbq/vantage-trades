@@ -35,8 +35,8 @@ jobs:
       - name: Configuration self-check
         run: |
           URL="${{ inputs.url }}"
-          code=$(curl -sS -m 30 -o /tmp/health.json -w '%{http_code}' "$URL/api/health" || echo 000)
-          echo "GET /api/health  -> $code"
+          code=$(curl -sS -m 30 -o /tmp/health.json -w '%{http_code}' "$URL/api/health?feed=1" || echo 000)
+          echo "GET /api/health?feed=1 -> $code"
           echo '--- body ---'
           # 503 is a legitimate answer here: it means the check ran and something
           # failed. The body is the diagnosis, so print it either way.

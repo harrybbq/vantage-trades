@@ -574,3 +574,67 @@ describe('the TLS settings that reach the driver', () => {
     expect(poolConfig(neon).connectionString).toContain('sslmode=require');
   });
 });
+
+describe('probing the market data provider', () => {
+  const env = {
+    SUPABASE_URL: 'https://abcdefgh.supabase.co',
+    SUPABASE_ANON_KEY: 'sb_publishable_x',
+    OWNER_USER_ID: '11111111-2222-4333-8444-555555555555',
+    DATABASE_URL: 'postgresql://u:p@host:6543/postgres?sslmode=require',
+    MARKET_DATA_API_KEY: 'super-secret-key',
+  } as NodeJS.ProcessEnv;
+
+  const dbOk = async () => [
+    { name: 'database', ok: true, detail: 'connected' },
+    { name: 'ledger schema', ok: true, detail: 'installed' },
+  ];
+
+  it('does not spend an API credit unless asked', async () => {
+    // The endpoint is public. A health check that quietly burns a
+    // rate-limited quota on every hit eventually causes the outage it exists
+    // to detect.
+    const fake = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ code: 401 }), { status: 401 }));
+
+    const report = await healthReport({}, env, fake as unknown as typeof fetch, dbOk);
+    expect(report.checks.map((c) => c.name)).not.toContain('market data');
+  });
+
+  it('reports the price it would store', async () => {
+    const fake = vi.fn().mockImplementation((url: string) =>
+      String(url).includes('twelvedata')
+        ? Promise.resolve(new Response(JSON.stringify({ close: '102.34', currency: 'GBP' })))
+        : Promise.resolve(new Response(JSON.stringify({ code: 401 }), { status: 401 })),
+    );
+
+    const report = await healthReport({}, env, fake as unknown as typeof fetch, dbOk, true);
+    const feed = report.checks.find((c) => c.name === 'market data');
+    expect(feed?.ok).toBe(true);
+    expect(feed?.detail).toContain('10234 pence');
+  });
+
+  it('quotes the provider\'s refusal, without the key', async () => {
+    // A provider that echoes the request back would otherwise publish the key
+    // on a public URL.
+    const fake = vi.fn().mockImplementation((url: string) =>
+      String(url).includes('twelvedata')
+        ? Promise.resolve(
+            new Response(
+              JSON.stringify({
+                status: 'error',
+                message: 'symbol not found for apikey=super-secret-key',
+              }),
+            ),
+          )
+        : Promise.resolve(new Response(JSON.stringify({ code: 401 }), { status: 401 })),
+    );
+
+    const report = await healthReport({}, env, fake as unknown as typeof fetch, dbOk, true);
+    const feed = report.checks.find((c) => c.name === 'market data');
+
+    expect(feed?.ok).toBe(false);
+    expect(feed?.detail).toContain('symbol not found');
+    expect(JSON.stringify(report)).not.toContain('super-secret-key');
+  });
+});

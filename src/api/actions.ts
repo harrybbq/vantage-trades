@@ -161,7 +161,16 @@ export async function doReconcileNow(
   _input: Record<string, unknown>,
   _actor: string,
 ): Promise<ControlPanelView> {
-  await refreshPrices();
+  const prices = await refreshPrices();
+
+  // Said out loud. A refused symbol writes nothing, which is the safe
+  // failure — but it also means a feed that is rejecting everything looks
+  // exactly like a ledger with nothing to price, and the reconciliation that
+  // follows reports clean either way.
+  for (const { symbol, reason } of prices.rejected) {
+    console.warn(`no price for ${symbol}: ${reason}`);
+  }
+
   await runDailyReconcile(new PaperBroker(getPool()));
 
   // Whatever it decided is now the newest row, and the view reads it back —

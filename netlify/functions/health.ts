@@ -15,7 +15,11 @@ export default async function health(request: Request): Promise<Response> {
     headers[key.toLowerCase()] = value;
   });
 
-  const report = await healthReport(headers);
+  // ?feed=1 additionally asks the market data provider for one quote. Opt-in
+  // because it spends a rate-limited API credit and this endpoint is public.
+  const probeFeed = new URL(request.url).searchParams.get('feed') === '1';
+
+  const report = await healthReport(headers, process.env, fetch, undefined, probeFeed);
 
   return Response.json(report, {
     // 503 when something is actually wrong, so a glance at the status code is
