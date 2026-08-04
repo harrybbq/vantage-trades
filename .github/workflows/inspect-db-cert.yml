@@ -23,6 +23,10 @@ on:
         description: 'Supabase region, used when host is blank'
         required: false
         default: 'eu-central-2'
+      ref:
+        description: 'Project ref, to find which pooler node hosts the tenant'
+        required: false
+        default: ''
 
 jobs:
   inspect:
@@ -57,4 +61,32 @@ jobs:
               </dev/null 2>/dev/null \
               | openssl x509 -noout -subject -issuer -dates -ext subjectAltName 2>&1 \
               | head -20 || true
+          done
+
+      - name: Which pooler node hosts the tenant
+        if: inputs.ref != ''
+        run: |
+          # Supavisor answers "Tenant or user not found" when the project does
+          # not live on the node you connected to, and a password error when it
+          # does. That difference identifies the right host without anyone
+          # needing to hand over the real password — the one used here is
+          # deliberately invalid and is not a guess at anything.
+          for prefix in aws-0 aws-1; do
+            h="$prefix-${{ inputs.region }}.pooler.supabase.com"
+            echo "=============================================================="
+            echo "host: $h"
+
+            out=$(PGPASSWORD='not-the-real-password' timeout 25 psql \
+              "postgresql://postgres.${{ inputs.ref }}@$h:6543/postgres?sslmode=require" \
+              -c 'select 1' 2>&1 || true)
+
+            case "$out" in
+              *"Tenant or user not found"*|*"tenant/user"*)
+                echo "  NOT this node — the tenant is not here" ;;
+              *"password authentication failed"*|*"SASL"*|*"authentication"*)
+                echo "  >>> THIS IS THE HOST — the tenant exists here and only the password was refused" ;;
+              *)
+                echo "  unrecognised reply:"
+                echo "$out" | head -5 ;;
+            esac
           done
