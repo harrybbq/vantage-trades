@@ -25,6 +25,39 @@ orders and never holds broker credentials.
 
 ---
 
+## The owner is new to trading — the panel guides
+
+The owner has little trading experience, so the panel has to guide decisions,
+not just display numbers. In practice:
+
+- **Every figure gets a plain-English explanation**, on by default, which the
+  owner can switch off ("Guide on/off"). No unexplained jargon: spread, pp,
+  equity, allocation, VWRP all say what they mean where they appear.
+- **One "your next step" at a time**, with the reason, plus where the owner is
+  in the journey (fund → set up agents → paper-trade 60 trading days → judge
+  against VWRP → decide about real money). Say so when nothing needs doing —
+  checking more often tends to mean meddling more.
+- **A verdict on each agent**: too early to judge, decision needed (with the
+  options spelled out), or ready to start. No verdict on performance before
+  60 trading days; earlier gaps are noise and the panel says so.
+- **Guidance at the moment of choice**, inside the dialog: capital sizing
+  against the fund (soft warning above 25% for an agent with no record),
+  "Halt instead?" inside Kill, what the daily loss cap means in pounds.
+- **Real money is gated by a checklist** the panel tracks (60 trading days,
+  20 consecutive clean reconciliations, ahead of VWRP after costs, Kill
+  tested on paper with positions, limits set). The switch stays locked until
+  every line is ticked.
+
+What the guidance must never do: suggest which shares to buy or predict
+prices. It guides **process and risk** — sizing, when to judge, halt vs kill,
+what a number means — and measures the agents against VWRP. Stock-picking
+advice is exactly what the *Effectiveness* section says doesn't work, and if
+this ever serves anyone but the owner it becomes regulated advice.
+
+Design reference: the redesign mockup (a private artifact the owner holds), not in the repo.
+
+---
+
 ## Hard rules
 
 - **MONEY SAFETY IS PRIORITY #1.** The equivalent of Vantage's data-safety
