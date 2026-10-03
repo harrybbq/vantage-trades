@@ -296,11 +296,10 @@ function ControlPanel() {
           <b>Global halt.</b> Freezes every agent at once, whatever state each is in. Nothing is
           sold — positions stay exactly as they are. Works even if an agent's own loop is wedged.
         </div>
-        <button
-          className="btn-danger-solid"
-          onClick={() => setDialog({ kind: 'globalHalt' })}
-          disabled={busy}
-        >
+        {/* Never disabled. Every other control waits while something is in
+            flight, but this is the one that must work when something is stuck
+            — a slow reconcile used to grey it out for as long as it ran. */}
+        <button className="btn-danger-solid" onClick={() => setDialog({ kind: 'globalHalt' })}>
           Halt everything
         </button>
       </div>

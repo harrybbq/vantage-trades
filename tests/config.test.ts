@@ -589,6 +589,20 @@ describe('probing the market data provider', () => {
     { name: 'ledger schema', ok: true, detail: 'installed' },
   ];
 
+  const OWNER_HEADERS = { authorization: 'Bearer owner-session' };
+
+  /** Supabase answers as the owner for a bearer, 401 without; the feed as given. */
+  const routed = (feed: () => Response) =>
+    vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes('twelvedata')) return Promise.resolve(feed());
+      const auth = (init?.headers as Record<string, string> | undefined)?.['Authorization'];
+      return Promise.resolve(
+        auth
+          ? new Response(JSON.stringify({ id: '11111111-2222-4333-8444-555555555555' }))
+          : new Response(JSON.stringify({ code: 401 }), { status: 401 }),
+      );
+    });
+
   it('does not spend an API credit unless asked', async () => {
     // The endpoint is public. A health check that quietly burns a
     // rate-limited quota on every hit eventually causes the outage it exists
@@ -601,14 +615,20 @@ describe('probing the market data provider', () => {
     expect(report.checks.map((c) => c.name)).not.toContain('market data');
   });
 
-  it('reports the price it would store', async () => {
-    const fake = vi.fn().mockImplementation((url: string) =>
-      String(url).includes('twelvedata')
-        ? Promise.resolve(new Response(JSON.stringify({ close: '102.34', currency: 'GBP' })))
-        : Promise.resolve(new Response(JSON.stringify({ code: 401 }), { status: 401 })),
-    );
-
+  it('will not spend a credit for an anonymous caller, even when asked', async () => {
+    // The endpoint is public. Anyone calling ?feed=1 in a loop could otherwise
+    // exhaust the quota, freeze every price, and leave equity looking normal.
+    const fake = routed(() => new Response(JSON.stringify({ close: '1', currency: 'GBP' })));
     const report = await healthReport({}, env, fake as unknown as typeof fetch, dbOk, true);
+
+    expect(report.checks.map((c) => c.name)).not.toContain('market data');
+    expect(fake.mock.calls.some(([url]) => String(url).includes('twelvedata'))).toBe(false);
+  });
+
+  it('reports the price it would store', async () => {
+    const fake = routed(() => new Response(JSON.stringify({ close: '102.34', currency: 'GBP' })));
+
+    const report = await healthReport(OWNER_HEADERS, env, fake as unknown as typeof fetch, dbOk, true);
     const feed = report.checks.find((c) => c.name === 'market data');
     expect(feed?.ok).toBe(true);
     expect(feed?.detail).toContain('10234 pence');
@@ -617,20 +637,14 @@ describe('probing the market data provider', () => {
   it('quotes the provider\'s refusal, without the key', async () => {
     // A provider that echoes the request back would otherwise publish the key
     // on a public URL.
-    const fake = vi.fn().mockImplementation((url: string) =>
-      String(url).includes('twelvedata')
-        ? Promise.resolve(
-            new Response(
-              JSON.stringify({
-                status: 'error',
-                message: 'symbol not found for apikey=super-secret-key',
-              }),
-            ),
-          )
-        : Promise.resolve(new Response(JSON.stringify({ code: 401 }), { status: 401 })),
+    const fake = routed(
+      () =>
+        new Response(
+          JSON.stringify({ status: 'error', message: 'symbol not found for apikey=super-secret-key' }),
+        ),
     );
 
-    const report = await healthReport({}, env, fake as unknown as typeof fetch, dbOk, true);
+    const report = await healthReport(OWNER_HEADERS, env, fake as unknown as typeof fetch, dbOk, true);
     const feed = report.checks.find((c) => c.name === 'market data');
 
     expect(feed?.ok).toBe(false);

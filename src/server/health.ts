@@ -110,8 +110,34 @@ async function checkDatabase(): Promise<Check[]> {
     );
     const installed = rows[0]?.installed ?? null;
 
+    // How old the newest stored price is. Read from the database rather than
+    // by asking the provider, so it costs no API credit and is safe to answer
+    // on a public endpoint. A feed that has quietly stopped shows up here as an
+    // age that keeps growing, which "reconciled clean" alone would never show.
+    const fresh = installed
+      ? await client.query<{ newest: Date | null }>(
+          'select max(updated_at) as newest from paper.market_prices',
+        )
+      : null;
+    const newest = fresh?.rows[0]?.newest ?? null;
+    const ageHours = newest ? (Date.now() - newest.getTime()) / 3_600_000 : null;
+
     return [
       { name: 'database', ok: true, detail: 'connected' },
+      ...(installed
+        ? [
+            {
+              name: 'prices',
+              // Over three days covers a weekend; anything older is a feed
+              // that has stopped, not a market that is shut.
+              ok: ageHours !== null && ageHours < 72,
+              detail:
+                newest === null
+                  ? 'nothing has ever been priced'
+                  : `newest stored price is ${ageHours! < 1 ? 'under an hour' : `${Math.round(ageHours!)}h`} old`,
+            },
+          ]
+        : []),
       {
         name: 'ledger schema',
         ok: installed !== null,
@@ -183,6 +209,7 @@ export async function healthReport(
 ): Promise<HealthReport> {
   const config = serverConfigReport(env);
   const checks = [...config.checks];
+  let isOwner = false;
 
   const url = env['SUPABASE_URL']?.trim().replace(/\/+$/, '');
   const anonKey = env['SUPABASE_ANON_KEY']?.trim();
@@ -202,6 +229,7 @@ export async function healthReport(
       fetchImpl,
     );
     if (caller) checks.push(caller);
+    isOwner = caller?.ok === true;
   }
 
   // Only worth connecting once the string is the right shape; otherwise the
@@ -210,7 +238,11 @@ export async function healthReport(
     checks.push(...(await probeDatabase()));
   }
 
-  if (probeFeed) {
+  // The live probe spends a rate-limited provider credit, so it is only run
+  // for the signed-in owner. Left public, anyone could call it in a loop,
+  // exhaust the quota, freeze every price, and leave the panel showing normal
+  // equity over stale marks.
+  if (probeFeed && isOwner) {
     checks.push(await checkMarketData(fetchImpl, env));
   }
 

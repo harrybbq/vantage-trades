@@ -110,6 +110,10 @@ async function request<T>(init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(BASE, {
+      // A request that never answers used to hold the panel's busy flag
+      // forever, and with it every control. 30s is past the serverless
+      // function's own limit, so anything still waiting has already failed.
+      signal: AbortSignal.timeout(30_000),
       ...init,
       headers: {
         'content-type': 'application/json',

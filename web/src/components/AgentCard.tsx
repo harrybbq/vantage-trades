@@ -132,7 +132,9 @@ export function AgentCard({
             </button>
             <span className="spacer" />
             {agent.status === 'running' ? (
-              <button className="btn-sm" onClick={onHalt} disabled={busy}>
+              // Not disabled while busy: halting can only ever reduce what an
+              // agent does, so it must not wait behind a slow reconcile.
+              <button className="btn-sm" onClick={onHalt}>
                 Halt
               </button>
             ) : (
