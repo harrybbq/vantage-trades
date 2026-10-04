@@ -88,3 +88,15 @@ describe('the next step', () => {
     expect(nextStep(v, integrityOf(v)).title).toBe('Nothing needs you today');
   });
 });
+
+describe('the first run', () => {
+  it('asks for a bank transfer first, not a check of an empty ledger', () => {
+    const v = view({ unallocatedMinor: '0', allocatedMinor: '0', agents: [], reconciliation: null });
+    expect(nextStep(v, integrityOf(v)).title).toBe('Record your first bank transfer');
+  });
+
+  it('then an agent', () => {
+    const v = view({ unallocatedMinor: '500000', allocatedMinor: '0', agents: [], reconciliation: null });
+    expect(nextStep(v, integrityOf(v)).title).toBe('Add your first agent');
+  });
+});

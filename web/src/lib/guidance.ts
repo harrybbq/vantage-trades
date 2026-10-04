@@ -193,9 +193,6 @@ export function nextStep(view: ControlPanelView, integrity: IntegrityState): Nex
   if (integrity.level === 'diverged') {
     return { title: 'Find out why the ledger and broker disagree', why: integrity.detail, steps: ['Halt all agents while you look.', 'Read the check’s detail in Activity.', 'Press Check now once you think it is fixed.'] };
   }
-  if (integrity.level === 'unknown') {
-    return { title: 'Get a fresh check', why: integrity.detail, steps: ['Press Check now.', 'If it keeps failing, the nightly job may have stopped: see /api/health.'] };
-  }
   if (fund <= 0n) {
     return { title: 'Record your first bank transfer', why: 'Nothing can happen until the pot has money in it. In paper mode this is pretend money: record any amount you would one day be willing to trade with.' };
   }
@@ -218,6 +215,12 @@ export function nextStep(view: ControlPanelView, integrity: IntegrityState): Nex
   if (listless) return { title: `Choose what ${listless.name} may trade`, why: 'With an empty share list it cannot open anything. Use Universe on its card.' };
   const ready = live.find((a) => a.status === 'idle');
   if (ready) return { title: `Start ${ready.name}`, why: 'It has capital and a share list. Starting begins its paper record, and nothing real is at risk.' };
+  // After setup: while the owner is still adding money and agents, there is
+  // nothing for a check to confirm, and "get a check" would bury the step
+  // they actually need.
+  if (integrity.level === 'unknown') {
+    return { title: 'Get a fresh check', why: integrity.detail, steps: ['Press Check now.', 'If it keeps failing, the nightly job may have stopped: see /api/health.'] };
+  }
   if (integrity.level === 'stale') return { title: 'Wait for tonight’s prices', why: integrity.detail };
   return { title: 'Nothing needs you today', why: 'Checking once a day is plenty. Agents only act a few times a day, and more watching tends to mean more meddling.' };
 }

@@ -172,7 +172,11 @@ export function Coach({ view, readiness, next }: { view: ControlPanelView; readi
 export function FundSummary({ view, colors, onFunds }: { view: ControlPanelView; colors: Map<string, string>; onFunds: () => void }) {
   const live = view.agents.filter((a) => a.status !== 'killed');
   const unpriced = [...new Set(live.flatMap((a) => a.unpricedSymbols))];
-  const pricedTotal = live.reduce((sum, a) => sum + BigInt(a.equityMinor ?? a.cashMinor), BigInt(view.unallocatedMinor));
+  // What is known: each agent's cash plus every holding that has a price.
+  const pricedTotal = live.reduce(
+    (sum, a) => sum + BigInt(a.cashMinor) + a.holdings.reduce((s, h) => s + (h.marketValueMinor === null ? 0n : BigInt(h.marketValueMinor)), 0n),
+    BigInt(view.unallocatedMinor),
+  );
   const realised = live.reduce((sum, a) => sum + BigInt(a.realisedMinor), 0n);
   const fund = BigInt(view.unallocatedMinor) + BigInt(view.allocatedMinor);
   const slices = live
@@ -433,7 +437,7 @@ export function AgentPanel({ agent, color, series, busy, first, ...act }: { agen
         </div>
         {agent.equityMinor === null && (
           <div className="why">
-            {formatGBP(agent.cashMinor)} cash, plus {agent.unpricedSymbols.join(', ')} with no price
+            {formatGBP((BigInt(agent.cashMinor) + agent.holdings.reduce((s, h) => s + (h.marketValueMinor === null ? 0n : BigInt(h.marketValueMinor)), 0n)).toString())} priced, plus {agent.unpricedSymbols.join(', ')} with no price
           </div>
         )}
       </div>
@@ -470,13 +474,17 @@ export function AgentPanel({ agent, color, series, busy, first, ...act }: { agen
       <div className="limits">
         <div className="limit">
           <div className="row">
-            <span>Today's loss vs daily cap</span>
+            <span>Today's loss vs daily cap (about)</span>
             <span className="num">
               {loss === null ? '—' : formatGBP((loss > 0n ? loss : 0n).toString())} / {cap === null ? 'none' : formatGBP(cap.toString())}
             </span>
           </div>
           <LossBullet lossPence={loss} capPence={cap} />
-          <div className="sub">{agent.status === 'halted' ? "Halted, so it cannot trade today. What it holds still moves with the market." : 'The black tick is the cap.'}</div>
+          <div className="sub">
+            {agent.status === 'halted'
+              ? 'Halted, so it cannot trade today. What it holds still moves with the market.'
+              : `The black tick is the cap: ${agent.dailyLossCapPct ?? '—'}% of the day's opening value, shown here against its allocation.`}
+          </div>
         </div>
         <div className="limit">
           <div className="row">

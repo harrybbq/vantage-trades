@@ -234,7 +234,7 @@ function ControlPanel() {
             {guide ? 'Guide on' : 'Guide off'}
           </button>
           {authConfigured && (
-            <button className="btn hide-sm" onClick={() => void signOut()}>
+            <button className="btn v-sm" onClick={() => void signOut()}>
               Sign out
             </button>
           )}
