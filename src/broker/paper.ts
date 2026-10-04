@@ -109,6 +109,11 @@ export class PaperBroker implements BrokerAdapter, FundableBroker {
     return { asOf: new Date(), cashMinor: cash, equityMinor: cash + marketValue };
   }
 
+  /** Cash alone. Unlike getAccount, needs no price for anything held. */
+  async getCash(): Promise<Minor> {
+    return this.cashMinor();
+  }
+
   async getPositions(): Promise<BrokerPosition[]> {
     const result = await this.tx.query<{ symbol: string; qty: string }>(
       `select symbol, qty::text as qty from paper.positions where qty > 0 order by symbol`,

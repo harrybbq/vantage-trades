@@ -139,7 +139,15 @@ export async function globalHalt(tx: Sql, actor: string, reason?: string): Promi
 
 export interface KillPreview {
   agentId: string;
-  positions: { symbol: string; qty: Qty; costBasisMinor: Minor }[];
+  positions: {
+    symbol: string;
+    qty: Qty;
+    costBasisMinor: Minor;
+    /** The latest stored price, or null when there is none to sell at. */
+    lastPriceMinor: Minor | null;
+    /** Other agents holding the same share, whose shares this kill leaves alone. */
+    others: { agentId: string; qty: Qty }[];
+  }[];
   uninvestedCashMinor: Minor;
   /** Ready to drop into a confirmation prompt. */
   summary: string;
@@ -202,10 +210,25 @@ export async function previewKill(tx: Sql, agentId: string): Promise<KillPreview
 
   const cash = await balance(tx, await accountId(tx, 'agent_cash', agentId));
 
+  const marks = await tx.query<{ symbol: string; price_minor: bigint }>(
+    `select distinct on (symbol) symbol, price_minor from ledger.marks
+      where symbol = any($1) order by symbol, as_of desc`,
+    [positions.rows.map((r) => r.symbol)],
+  );
+  const others = await tx.query<{ symbol: string; agent_id: string; qty: string }>(
+    `select symbol, agent_id, qty::text as qty from ledger.agent_positions
+      where symbol = any($1) and agent_id <> $2 order by agent_id`,
+    [positions.rows.map((r) => r.symbol), agentId],
+  );
+
   const parsed = positions.rows.map((r) => ({
     symbol: r.symbol,
     qty: parseQty(r.qty),
     costBasisMinor: r.cost_basis_minor,
+    lastPriceMinor: marks.rows.find((m) => m.symbol === r.symbol)?.price_minor ?? null,
+    others: others.rows
+      .filter((o) => o.symbol === r.symbol)
+      .map((o) => ({ agentId: o.agent_id, qty: parseQty(o.qty) })),
   }));
 
   const totalBasis = parsed.reduce((a, p) => a + p.costBasisMinor, 0n);

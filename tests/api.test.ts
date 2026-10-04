@@ -152,7 +152,7 @@ describe('every response can be serialised', () => {
       positions: { symbol: string; qty: string }[];
     };
     expect(preview.positions).toEqual([
-      { symbol: 'AAPL', qty: '4.00000000', costBasisMinor: '40000' },
+      { symbol: 'AAPL', qty: '4.00000000', costBasisMinor: '40000', lastPriceMinor: '11000', others: [] },
     ]);
   });
 

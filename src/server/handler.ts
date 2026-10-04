@@ -17,6 +17,8 @@ import { inTransaction } from '../db.js';
 import { describeInfrastructureFailure } from './config.js';
 import { controlPanelView } from '../api/view.js';
 import { statsView } from '../api/stats.js';
+import { performanceView } from '../api/performance.js';
+import { activity, readiness } from '../api/insights.js';
 
 export interface ApiRequest {
   method: string;
@@ -181,6 +183,16 @@ export async function handle(request: ApiRequest): Promise<ApiResponse> {
       // request to authenticate and one place to add an action.
       case 'stats':
         return json(200, await inTransaction((tx) => statsView(tx)));
+      case 'performance':
+        return json(
+          200,
+          await inTransaction(async (tx) => ({
+            performance: await performanceView(tx),
+            readiness: await readiness(tx),
+          })),
+        );
+      case 'activity':
+        return json(200, { items: await inTransaction((tx) => activity(tx)) });
       case 'reconcileNow':
         return json(200, await actions.doReconcileNow(body as never, actor));
       case 'recordDeposit':

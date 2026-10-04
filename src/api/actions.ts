@@ -251,7 +251,13 @@ export async function doGlobalHalt(
 
 export interface KillPreviewView {
   agentId: string;
-  positions: { symbol: string; qty: string; costBasisMinor: string }[];
+  positions: {
+    symbol: string;
+    qty: string;
+    costBasisMinor: string;
+    lastPriceMinor: string | null;
+    others: { agentId: string; qty: string }[];
+  }[];
   uninvestedCashMinor: string;
   summary: string;
 }
@@ -273,6 +279,8 @@ export async function doPreviewKill(input: { agentId: unknown }): Promise<KillPr
       symbol: p.symbol,
       qty: formatQty(p.qty),
       costBasisMinor: p.costBasisMinor.toString(),
+      lastPriceMinor: p.lastPriceMinor?.toString() ?? null,
+      others: p.others.map((o) => ({ agentId: o.agentId, qty: formatQty(o.qty) })),
     })),
     uninvestedCashMinor: preview.uninvestedCashMinor.toString(),
     summary: preview.summary,

@@ -14,7 +14,9 @@
 import type { Sql } from '../db.js';
 import { allAgentEquities, unallocatedPool } from '../ledger/equity.js';
 import { universesFor } from '../ledger/universe.js';
-import { formatQty } from '../money.js';
+import { formatQty, parseQty } from '../money.js';
+import { PaperBroker } from '../broker/paper.js';
+import { usingPaperBroker } from '../broker/config.js';
 
 export interface HoldingView {
   symbol: string;
@@ -39,6 +41,33 @@ export interface AgentView {
   universe: string[];
   holdings: HoldingView[];
   unpricedSymbols: string[];
+  /** Largest single order, as a percent of allocation. */
+  maxOrderPct: number;
+  /** The day's loss, as a percent, at which it halts itself. Null: no cap. */
+  dailyLossCapPct: number | null;
+  startedAt: string | null;
+  /**
+   * Today's gain or loss in pence, with money given or taken back since the
+   * last close removed first. Without that, a £500 top-up read as a £500 day.
+   */
+  todayMinor: string | null;
+}
+
+/**
+ * The broker sees one account. This splits each holding between the agents
+ * the ledger says own it, beside what the broker actually holds, so a
+ * mismatch is visible as a row rather than inferred from a total.
+ */
+export interface OwnershipView {
+  symbols: {
+    symbol: string;
+    owners: { agentId: string; qty: string }[];
+    ledgerQty: string;
+    /** Null when the broker cannot be asked from here. */
+    brokerQty: string | null;
+  }[];
+  ledgerCashMinor: string;
+  brokerCashMinor: string | null;
 }
 
 export interface ReconciliationView {
@@ -77,6 +106,7 @@ export interface ControlPanelView {
   todayMinor: string | null;
   reconciliation: ReconciliationView | null;
   agents: AgentView[];
+  ownership: OwnershipView;
   /**
    * Something the owner needs to read about the action that produced this
    * view — a kill that could not finish, say. Present only on the response
@@ -103,15 +133,73 @@ async function netAllocated(tx: Sql): Promise<Map<string, bigint>> {
   return new Map(result.rows.map((r) => [r.agent_id, r.net]));
 }
 
-/** Most recent snapshot strictly before today, per agent. */
+/**
+ * Most recent snapshot strictly before today, per agent, with the money moved
+ * in or out since it was taken — so "today" is what the day did, not what the
+ * owner did to it.
+ */
 async function priorClose(tx: Sql): Promise<Map<string, bigint>> {
-  const result = await tx.query<{ agent_id: string | null; equity_minor: bigint }>(
-    `select distinct on (agent_id) agent_id, equity_minor
-       from ledger.equity_snapshots
-      where as_of < current_date
-      order by agent_id, as_of desc`,
+  const result = await tx.query<{ agent_id: string | null; equity_minor: bigint; flows: bigint }>(
+    `with last as (
+       select distinct on (agent_id) agent_id, as_of, equity_minor
+         from ledger.equity_snapshots
+        where as_of < current_date
+        order by agent_id, as_of desc
+     ), cut as (
+       select l.*, coalesce(
+                (select max(r.as_of) from ledger.reconciliations r
+                  where r.status = 'ok' and (r.as_of at time zone 'UTC')::date = l.as_of),
+                (l.as_of + 1)::timestamp at time zone 'UTC') as cutoff
+         from last l
+     )
+     select c.agent_id, c.equity_minor,
+            coalesce((select sum(p.amount_minor)
+                        from ledger.postings p
+                        join ledger.accounts a on a.id = p.account_id
+                        join ledger.journal_entries e on e.id = p.entry_id
+                       where e.occurred_at > c.cutoff
+                         and ((c.agent_id is not null and a.kind = 'agent_cash' and a.agent_id = c.agent_id
+                               and e.kind in ('allocation', 'deallocation'))
+                           or (c.agent_id is null and a.kind = 'pool' and e.kind in ('deposit', 'withdrawal')))
+                     ), 0)::bigint as flows
+       from cut c`,
   );
-  return new Map(result.rows.map((r) => [r.agent_id ?? '__fund__', r.equity_minor]));
+  // The close plus what was added since: the baseline today is measured from.
+  return new Map(result.rows.map((r) => [r.agent_id ?? '__fund__', r.equity_minor + r.flows]));
+}
+
+async function ownership(tx: Sql): Promise<OwnershipView> {
+  const owned = await tx.query<{ symbol: string; agent_id: string; qty: string }>(
+    `select symbol, agent_id, qty::text as qty from ledger.agent_positions order by symbol, agent_id`,
+  );
+  const cash = await tx.query<{ total: bigint }>(
+    `select coalesce(sum(balance_minor), 0)::bigint as total
+       from ledger.account_balances where kind in ('pool', 'agent_cash')`,
+  );
+
+  let broker: Map<string, bigint> | null = null;
+  let brokerCash: bigint | null = null;
+  if (usingPaperBroker()) {
+    const paper = new PaperBroker(tx);
+    broker = new Map((await paper.getPositions()).map((p) => [p.symbol, p.qty]));
+    brokerCash = await paper.getCash();
+  }
+
+  const symbols = [...new Set([...owned.rows.map((r) => r.symbol), ...(broker?.keys() ?? [])])].sort();
+  return {
+    symbols: symbols.map((symbol) => {
+      const owners = owned.rows.filter((r) => r.symbol === symbol);
+      const total = owners.reduce((sum, o) => sum + parseQty(o.qty), 0n);
+      return {
+        symbol,
+        owners: owners.map((o) => ({ agentId: o.agent_id, qty: o.qty })),
+        ledgerQty: formatQty(total),
+        brokerQty: broker ? formatQty(broker.get(symbol) ?? 0n) : null,
+      };
+    }),
+    ledgerCashMinor: (cash.rows[0]?.total ?? 0n).toString(),
+    brokerCashMinor: brokerCash?.toString() ?? null,
+  };
 }
 
 function pctChange(from: bigint, to: bigint): number | null {
@@ -129,10 +217,15 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
   const allocatedNet = await netAllocated(tx);
   const closes = await priorClose(tx);
 
-  const names = await tx.query<{ id: string; name: string }>(
-    `select id, name from ledger.agents`,
+  const names = await tx.query<{
+    id: string; name: string; max_order_pct: string; daily_loss_cap_pct: string | null; started_at: Date | null;
+  }>(
+    `select id, name, max_order_pct::text as max_order_pct,
+            daily_loss_cap_pct::text as daily_loss_cap_pct, started_at
+       from ledger.agents`,
   );
   const nameById = new Map(names.rows.map((r) => [r.id, r.name]));
+  const railsById = new Map(names.rows.map((r) => [r.id, r]));
 
   const agents: AgentView[] = equities.map((e) => {
     const deployed = e.positionsMarketMinor ?? e.positionsBookMinor;
@@ -160,6 +253,11 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
         marketValueMinor: h.marketValueMinor?.toString() ?? null,
       })),
       unpricedSymbols: e.unpricedSymbols,
+      maxOrderPct: Number(railsById.get(e.agentId)?.max_order_pct ?? 25),
+      dailyLossCapPct:
+        railsById.get(e.agentId)?.daily_loss_cap_pct == null ? null : Number(railsById.get(e.agentId)!.daily_loss_cap_pct),
+      startedAt: railsById.get(e.agentId)?.started_at?.toISOString() ?? null,
+      todayMinor: e.equityMinor === null || close === undefined ? null : (e.equityMinor - close).toString(),
     };
   });
 
@@ -197,5 +295,6 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
         }
       : null,
     agents,
+    ownership: await ownership(tx),
   };
 }
