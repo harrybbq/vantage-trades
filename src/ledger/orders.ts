@@ -72,6 +72,22 @@ export async function markSubmitted(
   );
 }
 
+/** The broker turned it down. Nothing will fill against it. */
+export async function markRejected(
+  tx: Sql,
+  orderId: string,
+  brokerOrderId: string | null,
+  reason: string,
+): Promise<void> {
+  await tx.query(
+    `update ledger.orders
+        set status = 'rejected', broker_order_id = coalesce($2, broker_order_id),
+            reject_reason = $3, updated_at = now()
+      where id = $1`,
+    [orderId, brokerOrderId, reason],
+  );
+}
+
 function formatQtyForPg(qty: Qty): string {
   const whole = qty / 100000000n;
   const frac = (qty % 100000000n).toString().padStart(8, '0');

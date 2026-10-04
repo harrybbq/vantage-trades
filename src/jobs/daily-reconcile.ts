@@ -16,12 +16,24 @@ import { closePool } from '../db.js';
 import { inTransaction, getPool } from '../db.js';
 import { PaperBroker } from '../broker/paper.js';
 import type { BrokerAdapter } from '../broker/types.js';
-import { reconcile } from '../ledger/reconcile.js';
+import { reconcile, recordReconcileError } from '../ledger/reconcile.js';
 import { recordSnapshots, benchmarkComparison, benchmarkSymbol } from '../ledger/snapshots.js';
 import { syncFills, syncMarks } from '../pipeline/sync.js';
 import { findOrphanedOrders } from '../pipeline/submit.js';
 
 export async function runDailyReconcile(broker: BrokerAdapter): Promise<boolean> {
+  try {
+    return await reconcileOnce(broker);
+  } catch (error) {
+    // Best effort: if the database is what failed, this fails too, and the
+    // panel's staleness check is what catches it instead.
+    const message = error instanceof Error ? error.message : String(error);
+    await inTransaction((tx) => recordReconcileError(tx, `The check could not run: ${message}`)).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function reconcileOnce(broker: BrokerAdapter): Promise<boolean> {
   // Order matters: pull fills before valuing anything, or the ledger is
   // reconciled against positions it has not heard about yet.
   const fills = await syncFills(broker);
@@ -29,6 +41,10 @@ export async function runDailyReconcile(broker: BrokerAdapter): Promise<boolean>
     `fills: ${fills.recorded} recorded, ${fills.alreadyKnown} already known, ` +
       `${fills.unattributable.length} unattributable`,
   );
+
+  for (const failed of fills.failed) {
+    console.error(`FILL ${failed.brokerFillId} (${failed.symbol}) could not be recorded: ${failed.reason}`);
+  }
 
   for (const orphan of fills.unattributable) {
     console.error(
@@ -92,9 +108,27 @@ export async function runDailyReconcile(broker: BrokerAdapter): Promise<boolean>
     console.log('skipping the snapshot: the ledger diverged, so today has no trustworthy point');
   }
 
-  const clean =
-    result.status === 'ok' && fills.unattributable.length === 0 && orphanedOrders.length === 0;
-  return clean;
+  // Cash and shares can agree while the ledger is still missing something —
+  // a fill it refused, one it cannot attribute, an order the broker never
+  // acknowledged. Any of those makes the newest result an error, so the panel
+  // does not show "clean" over a ledger with a hole in it.
+  const problems = [
+    ...fills.failed.map((f) => `a ${f.symbol} fill could not be recorded (${f.reason})`),
+    ...fills.unattributable.map((f) => `a ${f.symbol} fill matches no order in the ledger`),
+    ...orphanedOrders.map((o) => `${o.agentId}'s ${o.symbol} order never got a broker id`),
+  ];
+  if (problems.length > 0) {
+    await inTransaction((tx) =>
+      recordReconcileError(
+        tx,
+        `${result.status === 'ok' ? 'Cash and shares match the broker, but ' : ''}` +
+          `${problems.length} problem(s) need looking at: ${problems.join('; ')}.`,
+        { problems },
+      ),
+    );
+  }
+
+  return result.status === 'ok' && problems.length === 0;
 }
 
 // Only runs when invoked directly, not when imported by a test.

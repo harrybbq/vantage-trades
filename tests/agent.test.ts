@@ -467,3 +467,92 @@ describe('what the agent costs to run', () => {
     expect(formatGBP(before.equityMinor ?? 0n)).toBeTruthy();
   });
 });
+
+/* ------------------------------------------------------------------------- */
+
+describe('several buys in one tick', () => {
+  /** Wants nearly all of the agent's cash in every symbol at once. */
+  const greedy = {
+    name: 'greedy',
+    decide: (input: StrategyInput) =>
+      input.universe.map((symbol) => ({
+        action: 'buy' as const,
+        symbol,
+        notionalMinor: (input.cashMinor * 90n) / 100n,
+        why: 'test',
+      })),
+  };
+
+  it('sizes each one against what the previous ones left, so the ledger can record every fill', async () => {
+    // The agent has £2,000 of a £5,000 account. Sized against its whole cash
+    // each time, the second £1,800 buy filled at the broker from other
+    // money and the ledger then refused the fill — and refused it again on
+    // every later sync, stopping every agent and every reconciliation.
+    await readyAgent('sma-1', { universe: ['AAPL', 'MSFT', 'TSLA'] });
+    await getPool().query(`update ledger.agents set max_order_pct = 100 where id = 'sma-1'`);
+
+    const outcome = await tick(broker(), greedy, 'sma-1');
+    expect(outcome.ran).toBe(true);
+
+    const equity = await inTransaction((tx) => agentEquity(tx, 'sma-1'));
+    expect(equity.cashMinor).toBeGreaterThanOrEqual(0n);
+    expect(equity.holdings.length).toBeGreaterThanOrEqual(1);
+
+    // Every fill the broker made is in the ledger.
+    const recorded = await getPool().query<{ n: string }>(`select count(*)::text as n from ledger.fills`);
+    const made = await getPool().query<{ n: string }>(`select count(*)::text as n from paper.fills`);
+    expect(recorded.rows[0]?.n).toBe(made.rows[0]?.n);
+
+    const { runDailyReconcile } = await import('../src/jobs/daily-reconcile.js');
+    expect(await runDailyReconcile(broker())).toBe(true);
+  });
+});
+
+describe('a fill the ledger cannot record', () => {
+  it('is set aside and reported, and the agent stops trading on the ledger until it is explained', async () => {
+    await readyAgent();
+    // A fill at the broker the ledger will refuse: a buy for far more than
+    // the agent's budget, placed straight at the broker under the agent's
+    // order, as a runaway would.
+    const { createOrder, markSubmitted } = await import('../src/ledger/orders.js');
+    const orderId = await inTransaction((tx) =>
+      createOrder(tx, { agentId: 'sma-1', symbol: 'AAPL', side: 'buy', qty: parseQty('200'), idempotencyKey: 'runaway' }),
+    );
+    const placed = await broker().placeOrder({ agentId: 'sma-1', symbol: 'AAPL', side: 'buy', qty: parseQty('200'), idempotencyKey: 'runaway' });
+    await inTransaction((tx) => markSubmitted(tx, orderId, placed.brokerOrderId));
+
+    const { syncFills } = await import('../src/pipeline/sync.js');
+    const synced = await syncFills(broker());
+    expect(synced.failed).toHaveLength(1);
+
+    await getPool().query(`update ledger.agents set last_tick_at = null`);
+    const outcome = await tick(broker(), new SmaCrossover({ window: 5 }), 'sma-1');
+    expect(outcome.ran).toBe(false);
+    expect(outcome.skipped).toMatch(/missing 1 fill/);
+
+    // And the reconciliation says so, rather than leaving yesterday's "clean".
+    const { runDailyReconcile } = await import('../src/jobs/daily-reconcile.js');
+    expect(await runDailyReconcile(broker())).toBe(false);
+    const last = await getPool().query<{ status: string; detail: { summary: string } }>(
+      `select status, detail from ledger.reconciliations order by run_at desc limit 1`,
+    );
+    expect(last.rows[0]?.status).toBe('error');
+    expect(last.rows[0]?.detail.summary).toMatch(/could not be recorded/);
+  });
+});
+
+describe('one agent failing', () => {
+  it('does not stop the others, and the run still reports the failure', async () => {
+    await readyAgent('aaa-1', { universe: ['AAPL'] });
+    await readyAgent('zzz-1', { universe: ['MSFT'] });
+    const broken = { name: 'broken', decide: (): never => { throw new Error('strategy blew up'); } };
+    const pick = (id: string) => (id === 'aaa-1' ? broken : new SmaCrossover({ window: 5, maxInvestedPct: 80 }));
+
+    // aaa-1 runs first and throws. zzz-1 must still get its turn, and the run
+    // must still end as a failure rather than a success with a log line.
+    await expect(runAllAgents(broker(), pick)).rejects.toThrow(/1 agent tick\(s\) failed: aaa-1: strategy blew up/);
+
+    const zzz = await inTransaction((tx) => agentEquity(tx, 'zzz-1'));
+    expect(zzz.holdings.map((h) => h.symbol)).toEqual(['MSFT']);
+  });
+});

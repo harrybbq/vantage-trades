@@ -181,3 +181,29 @@ function describeDivergence(
 
   return lines.join('\n');
 }
+
+/**
+ * Record that a reconciliation could not give a clean answer.
+ *
+ * A check that throws, or that finds fills it cannot attribute, used to write
+ * nothing at all — so the panel and the Vantage widget went on showing the
+ * last clean result, possibly for days. A failure has to be the newest row,
+ * because the newest row is what everything reads.
+ *
+ * The broker and computed figures are stored as zero with no equity, which
+ * the table's constraints allow only for a non-ok status. `detail.summary` is
+ * what the owner reads.
+ */
+export async function recordReconcileError(
+  tx: Sql,
+  summary: string,
+  detail: Record<string, unknown> = {},
+): Promise<void> {
+  await tx.query(
+    `insert into ledger.reconciliations
+       (as_of, broker_cash_minor, broker_equity_minor, computed_cash_minor,
+        computed_equity_minor, cash_diff_minor, equity_diff_minor, status, detail)
+     values (now(), 0, 0, 0, null, 0, null, 'error', $1)`,
+    [JSON.stringify({ ...detail, summary })],
+  );
+}

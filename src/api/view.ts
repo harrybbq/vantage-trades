@@ -26,7 +26,7 @@ export interface HoldingView {
 export interface AgentView {
   id: string;
   name: string;
-  status: 'idle' | 'running' | 'halted' | 'killed';
+  status: 'idle' | 'running' | 'halted' | 'killing' | 'killed';
   allocatedMinor: string;
   cashMinor: string;
   deployedMinor: string;
@@ -45,6 +45,28 @@ export interface ReconciliationView {
   status: 'ok' | 'diverged' | 'error';
   asOf: string;
   summary: string;
+  /** When the check ran, which is not always when its figures are from. */
+  runAt: string;
+  /**
+   * The nightly check should have run since this one and has not. A clean
+   * result from three days ago says nothing about today, and showing it as
+   * "clean" is how a stopped job goes unnoticed.
+   */
+  stale: boolean;
+}
+
+/**
+ * The most recent scheduled reconciliation that should have finished by now.
+ *
+ * Weekdays at 22:37 UTC, as `reconcile-scheduled` runs, with two hours' grace
+ * so a check still running, or retried, is not reported as missing.
+ */
+export function expectedReconcileBy(now: Date): Date {
+  const d = new Date(now.getTime() - 2 * 3_600_000);
+  const run = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 22, 37));
+  if (run > d) run.setUTCDate(run.getUTCDate() - 1);
+  while (run.getUTCDay() === 0 || run.getUTCDay() === 6) run.setUTCDate(run.getUTCDate() - 1);
+  return run;
 }
 
 export interface ControlPanelView {
@@ -55,6 +77,12 @@ export interface ControlPanelView {
   todayMinor: string | null;
   reconciliation: ReconciliationView | null;
   agents: AgentView[];
+  /**
+   * Something the owner needs to read about the action that produced this
+   * view — a kill that could not finish, say. Present only on the response
+   * to that action.
+   */
+  notice?: string;
 }
 
 /**
@@ -148,8 +176,8 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
   const todayMinor =
     totalEquity === null || fundClose === undefined ? null : totalEquity - fundClose;
 
-  const recon = await tx.query<{ status: string; as_of: Date; detail: { summary?: string } }>(
-    `select status, as_of, detail from ledger.reconciliations order by run_at desc limit 1`,
+  const recon = await tx.query<{ status: string; as_of: Date; run_at: Date; detail: { summary?: string } }>(
+    `select status, as_of, run_at, detail from ledger.reconciliations order by run_at desc limit 1`,
   );
   const last = recon.rows[0];
 
@@ -164,6 +192,8 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
           status: last.status as ReconciliationView['status'],
           asOf: last.as_of.toISOString(),
           summary: last.detail?.summary ?? '',
+          runAt: last.run_at.toISOString(),
+          stale: last.run_at < expectedReconcileBy(new Date()),
         }
       : null,
     agents,

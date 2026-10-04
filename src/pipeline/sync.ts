@@ -19,6 +19,12 @@ export interface SyncFillsResult {
   alreadyKnown: number;
   /** Broker fills with no matching order. Each one needs a human. */
   unattributable: { brokerFillId: string; brokerOrderId: string; symbol: string }[];
+  /**
+   * Fills the ledger refused to record — a budget cap, say. Each one means the
+   * ledger is missing something the broker did, so nothing should trade on the
+   * ledger's figures until it is explained.
+   */
+  failed: { brokerFillId: string; symbol: string; reason: string }[];
 }
 
 /**
@@ -39,10 +45,24 @@ export async function syncFills(broker: BrokerAdapter): Promise<SyncFillsResult>
 
   const fills = await broker.getFills(since);
 
-  const result: SyncFillsResult = { recorded: 0, alreadyKnown: 0, unattributable: [] };
+  const result: SyncFillsResult = { recorded: 0, alreadyKnown: 0, unattributable: [], failed: [] };
 
   for (const fill of fills) {
-    const outcome = await inTransaction(async (tx) => recordOne(tx, fill));
+    // One fill the ledger refuses used to throw out of the whole sync, every
+    // time it ran: every agent's tick and every reconciliation stopped on the
+    // same fill, while the panel went on showing the last clean result. Now
+    // it is set aside and reported, and the rest are recorded.
+    let outcome: Awaited<ReturnType<typeof recordOne>>;
+    try {
+      outcome = await inTransaction(async (tx) => recordOne(tx, fill));
+    } catch (error) {
+      result.failed.push({
+        brokerFillId: fill.brokerFillId,
+        symbol: fill.symbol,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
 
     if (outcome === 'recorded') result.recorded += 1;
     else if (outcome === 'known') result.alreadyKnown += 1;

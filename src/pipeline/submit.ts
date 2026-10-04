@@ -22,7 +22,7 @@
 import { inTransaction } from '../db.js';
 import type { Minor, Qty } from '../money.js';
 import type { BrokerAdapter } from '../broker/types.js';
-import { createOrder, markSubmitted } from '../ledger/orders.js';
+import { createOrder, markRejected, markSubmitted } from '../ledger/orders.js';
 
 export interface SubmitOrderInput {
   agentId: string;
@@ -40,6 +40,8 @@ export interface SubmitOrderInput {
 export interface SubmitResult {
   orderId: string;
   brokerOrderId: string;
+  /** The broker's reason, when it turned the order down. */
+  rejectedReason?: string;
 }
 
 export async function submitOrder(
@@ -65,6 +67,11 @@ export async function submitOrder(
     ...(input.limitPriceMinor !== undefined ? { limitPriceMinor: input.limitPriceMinor } : {}),
     idempotencyKey: input.idempotencyKey,
   });
+
+  if (placed.rejectedReason !== undefined) {
+    await inTransaction((tx) => markRejected(tx, orderId, placed.brokerOrderId, placed.rejectedReason!));
+    return { orderId, brokerOrderId: placed.brokerOrderId, rejectedReason: placed.rejectedReason };
+  }
 
   await inTransaction((tx) => markSubmitted(tx, orderId, placed.brokerOrderId));
 

@@ -14,7 +14,9 @@ import { inTransaction, getPool } from '../db.js';
 import { formatQty, parseMoney, type Minor } from '../money.js';
 import { createAgent } from '../ledger/agents.js';
 import { allocate, deallocate, recordDeposit, recordWithdrawal } from '../ledger/allocation.js';
-import { halt, start, globalHalt, previewKill, standDown, type KillPreview } from '../ledger/control.js';
+import { halt, start, globalHalt, previewKill, type KillPreview } from '../ledger/control.js';
+import { kill } from '../pipeline/kill.js';
+import { tradingBroker } from '../broker/select.js';
 import { addToUniverse, removeFromUniverse } from '../ledger/universe.js';
 import { controlPanelView, type ControlPanelView } from './view.js';
 import { PaperBroker } from '../broker/paper.js';
@@ -171,7 +173,7 @@ export async function doReconcileNow(
     console.warn(`no price for ${symbol}: ${reason}`);
   }
 
-  await runDailyReconcile(new PaperBroker(getPool()));
+  await runDailyReconcile(tradingBroker());
 
   // Whatever it decided is now the newest row, and the view reads it back —
   // so the panel shows the result rather than this function's opinion of it.
@@ -272,10 +274,14 @@ export async function doPreviewKill(input: { agentId: unknown }): Promise<KillPr
 }
 
 /**
- * Stand an agent down. Refuses while it still holds anything.
+ * Kill an agent: sell what it owns, then stand it down.
  *
  * The confirmation is checked here as well as in the browser: a UI check is
  * decoration, and this is the irreversible one.
+ *
+ * A kill that cannot finish — a holding with no price, a sale refused — is not
+ * an error: the agent is left in `killing`, which can only sell, and the reason
+ * comes back as `notice` with the view so the panel shows both at once.
  */
 export async function doKill(
   input: { agentId: unknown; confirm: unknown },
@@ -288,10 +294,13 @@ export async function doKill(
     );
   }
 
-  return inTransaction(async (tx) => {
-    await standDown(tx, agentId, actor);
-    return controlPanelView(tx);
+  const outcome = await kill(tradingBroker(), agentId, actor).catch((error: unknown) => {
+    // A refusal from the checks — an open order, an already-killed agent — is
+    // the owner's to read, not a server fault.
+    throw new ValidationError(error instanceof Error ? error.message : String(error));
   });
+  const view = await inTransaction((tx) => controlPanelView(tx));
+  return { ...view, notice: outcome.summary };
 }
 
 export async function doAddSymbol(

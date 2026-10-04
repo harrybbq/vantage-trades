@@ -9,6 +9,8 @@
  *           stop touching it" button.
  *   kill  - confirm, then liquidate everything and stand down. Capital returns
  *           to the pool. Destructive and irreversible: it realises losses.
+ *           In between it is `killing`: it may sell what it holds and
+ *           nothing else, and it stays there until every position is gone.
  *   start - resume from halted, or begin fresh.
  *
  * Halt being authoritative rather than advisory is enforced in the schema: a
@@ -22,11 +24,18 @@ import { accountId, balance } from './accounts.js';
 import { postEntry } from './journal.js';
 import { formatGBP, formatQty, parseQty, type Minor, type Qty } from '../money.js';
 
-export type AgentStatus = 'idle' | 'running' | 'halted' | 'killed';
+export type AgentStatus = 'idle' | 'running' | 'halted' | 'killing' | 'killed';
 
+/**
+ * Read an agent's status and hold its row until the transaction ends.
+ *
+ * Without the lock, two controls arriving together — Kill and Start, say —
+ * each read the same status, each decide they are allowed, and the last one
+ * to write wins whatever the first one did.
+ */
 async function currentStatus(tx: Sql, agentId: string): Promise<AgentStatus> {
   const result = await tx.query<{ status: AgentStatus }>(
-    `select status from ledger.agents where id = $1`,
+    `select status from ledger.agents where id = $1 for update`,
     [agentId],
   );
   const row = result.rows[0];
@@ -95,6 +104,12 @@ export async function start(
         'its P/L history resumes or starts fresh, so it is not a plain start.',
     );
   }
+  if (from === 'killing') {
+    throw new Error(
+      `agent ${agentId} is part-way through being killed. Finish the kill, or halt it to ` +
+        'stop selling; it cannot go back to trading from here.',
+    );
+  }
   await transition(tx, agentId, 'running', 'start', actor, reason);
 }
 
@@ -109,7 +124,7 @@ export async function globalHalt(tx: Sql, actor: string, reason?: string): Promi
   const affected = await tx.query<{ id: string }>(
     `update ledger.agents
         set status = 'halted', updated_at = now()
-      where status in ('running', 'idle')
+      where status in ('running', 'idle', 'killing')
       returning id`,
   );
 
@@ -138,6 +153,38 @@ export interface KillPreview {
  * prompt is that the owner can notice it is about to liquidate the wrong
  * agent.
  */
+/**
+ * Move an agent into `killing`, or confirm it is already there.
+ *
+ * Refuses while the agent has an order still open. Selling on top of a sale
+ * that has not finished would sell the same shares twice — and the broker,
+ * which has no idea which agent owns what, would happily take the second lot
+ * out of another agent's holding.
+ */
+export async function beginKill(tx: Sql, agentId: string, actor: string): Promise<void> {
+  const from = await currentStatus(tx, agentId);
+  if (from === 'killed') throw new Error(`agent ${agentId} is already killed`);
+
+  const open = await tx.query<{ symbol: string; side: string; status: string }>(
+    // Open means not yet fully filled, whatever the status column says: the
+    // status can lag the fills, and a filled order is no risk of a double sale.
+    `select o.symbol, o.side, o.status from ledger.orders o
+      where o.agent_id = $1 and o.status in ('pending', 'submitted', 'partially_filled')
+        and coalesce((select sum(f.qty) from ledger.fills f where f.order_id = o.id), 0) < o.qty
+      order by o.created_at`,
+    [agentId],
+  );
+  if (open.rows.length > 0) {
+    const list = open.rows.map((o) => `${o.side} ${o.symbol} (${o.status})`).join(', ');
+    throw new Error(
+      `agent ${agentId} has ${open.rows.length} order(s) still open: ${list}. Selling now could ` +
+        'sell the same shares twice. Wait for them to settle, then press Kill again.',
+    );
+  }
+
+  if (from !== 'killing') await transition(tx, agentId, 'killing', 'kill', actor, 'kill started');
+}
+
 export async function previewKill(tx: Sql, agentId: string): Promise<KillPreview> {
   const positions = await tx.query<{ symbol: string; qty: string; cost_basis_minor: bigint }>(
     `select symbol, qty::text as qty, cost_basis_minor

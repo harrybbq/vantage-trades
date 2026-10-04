@@ -97,8 +97,17 @@ export async function tick(
 
   // Pull fills and prices first, so the decision is made on current state
   // rather than on whatever was true at the end of the last tick.
-  await syncFills(broker);
+  const synced = await syncFills(broker);
   await syncMarks(broker);
+
+  if (synced.failed.length > 0 || synced.unattributable.length > 0) {
+    // The ledger is missing something the broker did, so every figure this
+    // tick would size from is wrong by an unknown amount.
+    outcome.skipped =
+      `the ledger is missing ${synced.failed.length + synced.unattributable.length} fill(s) the broker ` +
+      'reported; not trading on its figures until that is explained';
+    return outcome;
+  }
 
   const setup = await inTransaction(async (tx) => {
     const rows = await tx.query<AgentRow>(
@@ -180,17 +189,15 @@ export async function tick(
 
   const maxOrder = (input.allocatedMinor * BigInt(Math.round(Number(agent.max_order_pct) * 100))) / 10000n;
 
+  // Cash not yet spoken for this tick. Every buy used to be sized against the
+  // agent's whole cash, so three buys in one tick could each take most of it —
+  // the broker filled them from the account's cash, which other agents' money
+  // is part of, and the ledger then refused the fills that went past this
+  // agent's budget. Each buy now comes out of what the previous ones left.
+  const budget = { cashMinor: equity.cashMinor };
+
   for (const intent of intents) {
-    const refusal = await place(
-      broker,
-      strategy,
-      agentId,
-      intent,
-      bars,
-      maxOrder,
-      equity.cashMinor,
-      outcome,
-    );
+    const refusal = await place(broker, strategy, agentId, intent, bars, maxOrder, budget, outcome);
     if (refusal === 'stop') break;
   }
 
@@ -211,7 +218,7 @@ async function place(
   intent: Intent,
   bars: Map<string, PriceBar[]>,
   maxOrderMinor: Minor,
-  cashMinor: Minor,
+  budget: { cashMinor: Minor },
   outcome: TickOutcome,
 ): Promise<'ok' | 'stop'> {
   const series = bars.get(intent.symbol) ?? [];
@@ -238,7 +245,7 @@ async function place(
     // more than the cash on hand and is refused by the budget cap. Which is
     // the cap working correctly, and the runner asking for something it
     // should have known better than to ask for.
-    const affordable = (cashMinor * BigInt(100 - BUY_HEADROOM_PCT)) / 100n;
+    const affordable = (budget.cashMinor * BigInt(100 - BUY_HEADROOM_PCT)) / 100n;
     if (intent.notionalMinor > affordable) {
       intent = { ...intent, notionalMinor: affordable };
     }
@@ -274,13 +281,22 @@ async function place(
   const key = `${agentId}:${strategy.name}:${intent.action}:${intent.symbol}:${bar}`;
 
   try {
-    await submitOrder(broker, {
+    const result = await submitOrder(broker, {
       agentId,
       symbol: intent.symbol,
       side: intent.action,
       qty,
       idempotencyKey: key,
     });
+    if (result.rejectedReason !== undefined) {
+      outcome.refused.push({ symbol: intent.symbol, reason: `the broker refused: ${result.rejectedReason}` });
+      return 'ok';
+    }
+    if (intent.action === 'buy') {
+      // What it will roughly cost, with the same headroom it was sized with.
+      const cost = (notional(qty, last.closeMinor) * BigInt(100 + BUY_HEADROOM_PCT)) / 100n;
+      budget.cashMinor = budget.cashMinor > cost ? budget.cashMinor - cost : 0n;
+    }
     outcome.submitted.push({ symbol: intent.symbol, side: intent.action, why: intent.why });
     return 'ok';
   } catch (error) {

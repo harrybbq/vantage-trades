@@ -31,7 +31,10 @@ function strategyFor(_agentId: string): Strategy {
   return new SmaCrossover();
 }
 
-export async function runAllAgents(broker: BrokerAdapter): Promise<number> {
+export async function runAllAgents(
+  broker: BrokerAdapter,
+  pick: (agentId: string) => Strategy = strategyFor,
+): Promise<number> {
   const agents = await inTransaction(async (tx) => {
     const result = await tx.query<{ id: string }>(
       `select id from ledger.agents where status = 'running' order by id`,
@@ -45,10 +48,20 @@ export async function runAllAgents(broker: BrokerAdapter): Promise<number> {
   }
 
   let acted = 0;
+  const failures: string[] = [];
 
   for (const agentId of agents) {
-    const strategy = strategyFor(agentId);
-    const outcome = await tick(broker, strategy, agentId);
+    const strategy = pick(agentId);
+    // One agent throwing used to end the run for every agent after it.
+    let outcome: Awaited<ReturnType<typeof tick>>;
+    try {
+      outcome = await tick(broker, strategy, agentId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${agentId}: TICK FAILED - ${message}`);
+      failures.push(`${agentId}: ${message}`);
+      continue;
+    }
 
     if (outcome.selfHalted) {
       console.warn(`${agentId}: HALTED ITSELF - ${outcome.selfHalted}`);
@@ -69,6 +82,12 @@ export async function runAllAgents(broker: BrokerAdapter): Promise<number> {
     if (outcome.submitted.length === 0 && outcome.refused.length === 0) {
       console.log(`${agentId}: no signal`);
     }
+  }
+
+  // Thrown after every agent has had its turn, so the run still shows as
+  // failed rather than as a success that logged an error nobody reads.
+  if (failures.length > 0) {
+    throw new Error(`${failures.length} agent tick(s) failed: ${failures.join('; ')}`);
   }
 
   return acted;

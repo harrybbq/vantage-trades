@@ -146,7 +146,16 @@ export class PaperBroker implements BrokerAdapter, FundableBroker {
     const prior = existing.rows[0];
     if (prior) {
       // The retry path: same key, same order, no second position.
-      return { brokerOrderId: prior.id, acceptedAt: prior.created_at };
+      const was = await this.tx.query<{ status: string; reject_reason: string | null }>(
+        `select status, reject_reason from paper.orders where id = $1`,
+        [prior.id],
+      );
+      const row = was.rows[0];
+      return {
+        brokerOrderId: prior.id,
+        acceptedAt: prior.created_at,
+        ...(row?.status === 'rejected' ? { rejectedReason: row.reject_reason ?? 'rejected' } : {}),
+      };
     }
 
     const symbol = request.symbol.toUpperCase();
@@ -184,7 +193,11 @@ export class PaperBroker implements BrokerAdapter, FundableBroker {
       }
     }
 
-    return { brokerOrderId: row.id, acceptedAt: row.created_at };
+    return {
+      brokerOrderId: row.id,
+      acceptedAt: row.created_at,
+      ...(rejection ? { rejectedReason: rejection } : {}),
+    };
   }
 
   /**

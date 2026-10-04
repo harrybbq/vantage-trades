@@ -28,8 +28,8 @@
  */
 
 import { runAllAgents } from '../../src/jobs/run-agents.js';
-import { PaperBroker } from '../../src/broker/paper.js';
-import { closePool, getPool } from '../../src/db.js';
+import { tradingBroker } from '../../src/broker/select.js';
+import { closePool } from '../../src/db.js';
 
 export default async function agentsScheduled(): Promise<Response> {
   if (process.env['AGENTS_ENABLED'] !== 'true') {
@@ -39,7 +39,7 @@ export default async function agentsScheduled(): Promise<Response> {
   }
 
   try {
-    const acted = await runAllAgents(new PaperBroker(getPool()));
+    const acted = await runAllAgents(tradingBroker());
     return new Response(`ticked, ${acted} agent(s) acted`, { status: 200 });
   } catch (error) {
     console.error('the agent run failed:', error);

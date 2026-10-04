@@ -17,12 +17,12 @@
  */
 
 import { runDailyReconcile } from '../../src/jobs/daily-reconcile.js';
-import { PaperBroker } from '../../src/broker/paper.js';
-import { closePool, getPool } from '../../src/db.js';
+import { tradingBroker } from '../../src/broker/select.js';
+import { closePool } from '../../src/db.js';
 
 export default async function reconcileScheduled(): Promise<Response> {
   try {
-    const clean = await runDailyReconcile(new PaperBroker(getPool()));
+    const clean = await runDailyReconcile(tradingBroker());
 
     // Non-2xx on divergence, so the platform records a failed run rather than
     // a successful one that happened to log a disaster. A scheduled job whose

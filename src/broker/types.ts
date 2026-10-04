@@ -51,6 +51,13 @@ export interface PlaceOrderRequest {
 export interface PlacedOrder {
   brokerOrderId: string;
   acceptedAt: Date;
+  /**
+   * Set when the broker took the order and turned it down. A rejection is an
+   * answer, not an exception — but it is not a submission either, and an
+   * order recorded as submitted that will never fill is one that blocks a
+   * kill and confuses every count of what is in flight.
+   */
+  rejectedReason?: string;
 }
 
 export interface BrokerFill {

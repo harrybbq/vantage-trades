@@ -189,7 +189,10 @@ describe('control actions', () => {
     expect((result.body as { error: string }).error).toMatch(/repeating the agent id/);
   });
 
-  it('refuses a kill while the agent still holds something', async () => {
+  it('starts a kill that cannot finish, and says why alongside the new view', async () => {
+    // The holding here was recorded straight into the ledger, so the broker
+    // has no price for it. Kill used to refuse outright and leave the agent
+    // running; now it moves the agent to "killing" — sell-only — and explains.
     await seed();
     const result = await post({
       action: 'kill',
@@ -197,8 +200,10 @@ describe('control actions', () => {
       confirm: 'momentum-1',
     });
 
-    expect(result.status).toBe(409);
-    expect((result.body as { error: string }).error).toMatch(/still holds 1 position/);
+    expect(result.status).toBe(200);
+    const body = result.body as { notice: string; agents: { id: string; status: string }[] };
+    expect(body.notice).toMatch(/Kill not finished.*Still held: AAPL ×4:/);
+    expect(body.agents.find((a) => a.id === 'momentum-1')?.status).toBe('killing');
   });
 
   it('passes a domain refusal through as 409 with its own message', async () => {

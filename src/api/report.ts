@@ -169,7 +169,11 @@ export async function reportView(tx: Sql, asOf = new Date()): Promise<ReportView
       return {
         id: e.agentId,
         name: nameById.get(e.agentId) ?? e.agentId,
-        status: e.status as ReportAgent['status'],
+        // Vantage's widget knows four states. An agent part-way through a
+        // kill buys nothing and runs no strategy, so "halted" is the truthful
+        // one of those four; inventing a fifth would be a change to a contract
+        // Vantage has already shipped against.
+        status: (e.status === 'killing' ? 'halted' : e.status) as ReportAgent['status'],
         allocatedMinor: basis.toString(),
         equityMinor: e.equityMinor?.toString() ?? null,
         pnlPctSinceStart: e.equityMinor === null ? null : pct(basis, e.equityMinor),
