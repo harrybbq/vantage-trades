@@ -54,6 +54,25 @@ what a number means — and measures the agents against VWRP. Stock-picking
 advice is exactly what the *Effectiveness* section says doesn't work, and if
 this ever serves anyone but the owner it becomes regulated advice.
 
+**Chart rules** (from `docs/research/chart-research.md`, which looked at real
+products; its screenshots stayed on the owner's machine):
+
+- Compare against **the same money put into VWRP on the same days** (a shadow
+  ledger fed the same allocations), never a lump sum at the start. Use
+  time-weighted % for the comparison and the verdict, with a £ view beside it.
+  The £ view includes a stepped "money put in" line, so deposits don't look
+  like profit.
+- Show the lead as its own series, in pp, inside graded luck bands described
+  in odds ("19 days in 20"). No product does this, and it's the point of the app.
+- No per-year figures (CAGR, annualised anything) under a year of record. Hide
+  rolling metrics until their window is full. A chart needs 8 trading days,
+  otherwise "Not enough data yet".
+- The verdict and headline lead always cover the full record, and say so in the
+  label ("Lead since 25 Aug"). A window figure, if shown, is secondary and
+  labelled.
+- Every signed figure carries + or −, and drawdowns are always negative. A
+  missing price is a gap, never zero, never cost.
+
 Design reference: the redesign mockup (a private artifact the owner holds), not in the repo.
 
 ---
