@@ -110,7 +110,7 @@ Set these in the Netlify UI. Never in a file, never in a commit.
 | `VITE_SUPABASE_URL` | the same URL again, for the sign-in screen |
 | `VITE_SUPABASE_ANON_KEY` | the same anon key again, for the sign-in screen |
 | `BENCHMARK_SYMBOL` | optional, defaults to `VWRP` |
-| `MARKET_DATA_API_KEY` | a Twelve Data key. Without it nothing is priced — see below |
+| `MARKET_DATA_API_KEY` | an Alpha Vantage key (free). Without it nothing is priced — see below |
 
 **The two `VITE_` ones are deliberate and safe.** A Supabase project URL and
 its anon key are designed to be public — the anon key identifies the project
@@ -247,12 +247,30 @@ nothing and says so. It does not fall back to another source and it never
 invents a mark — an unpriced holding shows as unpriced everywhere, which is
 recoverable, while a wrong price is invisible and is not.
 
-[Twelve Data](https://twelvedata.com/pricing) has a free tier that covers a
-handful of symbols at daily-or-slower frequency, which is what this system
-needs. It also returns the currency explicitly, which matters more than it
-sounds: London quotes some instruments in pounds and others in pence, and the
-code refuses anything it cannot identify rather than guessing at a factor of
-one hundred.
+The provider is [Alpha Vantage](https://www.alphavantage.co/support/#api-key).
+Its free key covers London listings (`VWRP.LON`) at end-of-day frequency,
+which is what this system needs. Twelve Data was tried first; its free plan
+does not include the London exchange.
+
+Three things about the free plan shape the code:
+
+- **25 requests a day.** Prices are fetched once a day after the close, and
+  "Check now" only asks about symbols not yet priced since the last close. A
+  run that hits the limit stops asking at once rather than spending the rest
+  of the day's allowance learning the same thing.
+- **About one request a second.** Requests are made one at a time, 1.1 s apart.
+- **A quote has no currency.** London quotes some instruments in pounds and
+  others in pence, a factor of a hundred apart. The currency comes from the
+  provider's symbol search, asked once per symbol and kept in
+  `paper.feed_instruments`. A symbol it cannot find is refused rather than
+  assumed to be pounds, and a new price more than 3× away from the last one is
+  refused as a likely pounds/pence mix-up. If a price ever looks a hundred
+  times off, delete that symbol's row from `paper.feed_instruments` and the
+  next run asks again.
+
+`/api/health?feed=1`, opened while signed in, prices VWRP and shows the result.
+VWRP should read roughly £140–£150; if it reads around £1.45, the currency is
+wrong.
 
 ### Scheduled jobs
 
@@ -263,7 +281,7 @@ Two scheduled functions ship with the site. Netlify picks them up from their
 |---|---|---|
 | `reconcile-scheduled` | 22:37 UTC, weekdays | The mandatory daily reconciliation, then the equity snapshot |
 | `agents-scheduled` | hourly 14:00–20:00 UTC, weekdays | Ticks every running agent — **off unless `AGENTS_ENABLED=true`** |
-| `prices-scheduled` | hourly 08:00–17:00 UTC and once at 22:00, weekdays | Refreshes marks from the market data provider |
+| `prices-scheduled` | 17:12 UTC, weekdays | Refreshes marks from the market data provider, once, after the close |
 
 `agents-scheduled` is the only thing in the codebase that can place an order
 with no human present, so it ships switched off and stays that way until that

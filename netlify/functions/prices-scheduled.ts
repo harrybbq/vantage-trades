@@ -23,13 +23,15 @@ export default async function pricesScheduled(): Promise<Response> {
 
     const summary =
       `priced ${result.priced} of ${result.symbols.length}` +
-      (result.rejected.length ? `, refused ${result.rejected.map((r) => r.symbol).join(', ')}` : '');
+      (result.skipped.length ? `, ${result.skipped.length} already priced since the last close` : '') +
+      (result.rejected.length ? `, refused ${result.rejected.map((r) => r.symbol).join(', ')}` : '') +
+      ` (${result.requests} feed requests)`;
     console.log(summary);
 
     // Non-2xx when nothing could be priced but something should have been, so
     // a feed that has quietly stopped working shows as a failed run rather
     // than a successful one that logged a warning nobody reads.
-    const broken = result.symbols.length > 0 && result.priced === 0;
+    const broken = result.symbols.length > result.skipped.length && result.priced === 0;
     return new Response(summary, { status: broken ? 500 : 200 });
   } catch (error) {
     console.error('the price refresh failed:', error);
@@ -40,11 +42,13 @@ export default async function pricesScheduled(): Promise<Response> {
 }
 
 /**
- * Hourly through the London session, plus once before the nightly
- * reconciliation.
+ * Once a day, after the London close.
  *
- * 08:00–17:00 UTC covers 08:00–16:30 London across both daylight and standard
- * time. The 22:00 run is so reconciliation at 22:37 values the book against a
- * closing price fetched minutes earlier rather than one from the afternoon.
+ * The free feed allows 25 requests a day and serves end-of-day prices, so an
+ * hourly run would exhaust the allowance by lunchtime and learn nothing new.
+ * 17:12 UTC is after the close in summer and winter time, and well before the
+ * nightly reconciliation at 22:37. "Check now" on the panel asks only about
+ * symbols not yet priced since the last close, so it costs nothing on a day
+ * this has already run.
  */
-export const config = { schedule: '22 8-17,22 * * 1-5' };
+export const config = { schedule: '12 17 * * 1-5' };

@@ -592,9 +592,9 @@ describe('probing the market data provider', () => {
   const OWNER_HEADERS = { authorization: 'Bearer owner-session' };
 
   /** Supabase answers as the owner for a bearer, 401 without; the feed as given. */
-  const routed = (feed: () => Response) =>
+  const routed = (feed: (url: string) => Response) =>
     vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      if (String(url).includes('twelvedata')) return Promise.resolve(feed());
+      if (String(url).includes('alphavantage')) return Promise.resolve(feed(String(url)));
       const auth = (init?.headers as Record<string, string> | undefined)?.['Authorization'];
       return Promise.resolve(
         auth
@@ -618,15 +618,19 @@ describe('probing the market data provider', () => {
   it('will not spend a credit for an anonymous caller, even when asked', async () => {
     // The endpoint is public. Anyone calling ?feed=1 in a loop could otherwise
     // exhaust the quota, freeze every price, and leave equity looking normal.
-    const fake = routed(() => new Response(JSON.stringify({ close: '1', currency: 'GBP' })));
+    const fake = routed(() => new Response(JSON.stringify({ 'Global Quote': { '05. price': '1' } })));
     const report = await healthReport({}, env, fake as unknown as typeof fetch, dbOk, true);
 
     expect(report.checks.map((c) => c.name)).not.toContain('market data');
-    expect(fake.mock.calls.some(([url]) => String(url).includes('twelvedata'))).toBe(false);
+    expect(fake.mock.calls.some(([url]) => String(url).includes('alphavantage'))).toBe(false);
   });
 
   it('reports the price it would store', async () => {
-    const fake = routed(() => new Response(JSON.stringify({ close: '102.34', currency: 'GBP' })));
+    const fake = routed((url) =>
+      url.includes('SYMBOL_SEARCH')
+        ? new Response(JSON.stringify({ bestMatches: [{ '1. symbol': 'VWRP.LON', '8. currency': 'GBP' }] }))
+        : new Response(JSON.stringify({ 'Global Quote': { '05. price': '102.3400', '07. latest trading day': '2026-10-02' } })),
+    );
 
     const report = await healthReport(OWNER_HEADERS, env, fake as unknown as typeof fetch, dbOk, true);
     const feed = report.checks.find((c) => c.name === 'market data');
@@ -640,7 +644,7 @@ describe('probing the market data provider', () => {
     const fake = routed(
       () =>
         new Response(
-          JSON.stringify({ status: 'error', message: 'symbol not found for apikey=super-secret-key' }),
+          JSON.stringify({ 'Error Message': 'Invalid API call for apikey=super-secret-key' }),
         ),
     );
 
@@ -648,7 +652,7 @@ describe('probing the market data provider', () => {
     const feed = report.checks.find((c) => c.name === 'market data');
 
     expect(feed?.ok).toBe(false);
-    expect(feed?.detail).toContain('symbol not found');
+    expect(feed?.detail).toContain('Invalid API call');
     expect(JSON.stringify(report)).not.toContain('super-secret-key');
   });
 });

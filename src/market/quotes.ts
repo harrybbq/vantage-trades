@@ -1,5 +1,5 @@
 /**
- * Where prices come from.
+ * Where prices come from: Alpha Vantage.
  *
  * The paper broker is an execution simulator with no opinion about what things
  * cost — `paper.market_prices` was only ever written by tests and demos, so in
@@ -15,10 +15,18 @@
  * is merely down is a visible problem; a feed that is confidently wrong is the
  * failure this codebase exists to prevent.
  *
- * So the currency is checked on every quote, and anything that is not sterling
- * is refused rather than converted. The ledger is single-currency by schema —
+ * Alpha Vantage makes this harder than it should be: its quote carries no
+ * currency at all. The currency comes from its symbol search, asked once per
+ * symbol and remembered (see `CurrencyBook`), and a symbol it cannot find is
+ * refused rather than assumed to be pounds. Anything that is not sterling is
+ * refused rather than converted. The ledger is single-currency by schema —
  * converting here would put an exchange rate inside a valuation with no record
  * of which rate, which is the same class of mistake one level down.
+ *
+ * The free plan allows 25 requests a day and about one a second. Requests are
+ * made one at a time with a pause between them, and the first sign of the daily
+ * limit stops the run: every request after it would fail the same way, and
+ * there is nothing to be gained by spending them on finding that out.
  */
 
 export interface FeedQuote {
@@ -36,19 +44,44 @@ export interface RejectedQuote {
 export interface FeedResult {
   quotes: FeedQuote[];
   rejected: RejectedQuote[];
+  /** How many requests this run made, out of a small daily allowance. */
+  requests: number;
 }
 
 /**
- * The feed's name for a symbol, and the venue it trades on.
+ * The currency each symbol is quoted in, as the feed's symbol search reported
+ * it. Kept between runs so the daily allowance is spent on prices: a symbol's
+ * quoting currency does not change from one day to the next.
+ */
+export interface CurrencyBook {
+  get(symbol: string): Promise<string | undefined>;
+  set(symbol: string, feedSymbol: string, currency: string): Promise<void>;
+}
+
+/** A book that forgets everything when the process ends. Tests and probes. */
+export function memoryBook(seed: Record<string, string> = {}): CurrencyBook {
+  const known = new Map(Object.entries(seed).map(([k, v]) => [k.toUpperCase(), v]));
+  return {
+    get: async (symbol) => known.get(symbol.toUpperCase()),
+    set: async (symbol, _feedSymbol, currency) => void known.set(symbol.toUpperCase(), currency),
+  };
+}
+
+/**
+ * The feed's name for a symbol, or why it cannot have one.
  *
  * The ledger holds bare tickers because that is what the owner types and what
  * a broker will eventually want. London is assumed, since the ledger is
- * sterling. A symbol written `TICKER.VENUE` names its venue explicitly, for
- * the day one of them is not on the LSE.
+ * sterling; Alpha Vantage names London listings `TICKER.LON`. A symbol written
+ * `TICKER.VENUE` for any other venue is refused: it would not be quoted in
+ * sterling, and this ledger has nowhere to put anything else.
  */
-export function feedSymbol(symbol: string): { symbol: string; exchange: string } {
-  const [ticker = symbol, venue] = symbol.split('.');
-  return { symbol: ticker.toUpperCase(), exchange: (venue ?? 'LSE').toUpperCase() };
+export function feedSymbol(symbol: string): string | { refused: string } {
+  const [ticker = symbol, venue = 'LSE'] = symbol.toUpperCase().split('.');
+  if (venue !== 'LSE' && venue !== 'LON') {
+    return { refused: `listed on ${venue}, and this feed is only used for London listings` };
+  }
+  return `${ticker}.LON`;
 }
 
 /**
@@ -94,107 +127,108 @@ export function toPence(price: number, currency: string): bigint | string {
       return BigInt(Math.round(Number(price.toFixed(6))));
     default:
       return (
-        `quoted in ${currency}, and this ledger is sterling. Converting here would ` +
-        'bury an exchange rate inside a valuation with no record of which rate was used.'
+        `quoted in ${currency || 'an unstated currency'}, and this ledger is sterling. Converting ` +
+        'here would bury an exchange rate inside a valuation with no record of which rate was used.'
       );
   }
 }
 
-/** Twelve Data's quote shape, plus the error shape it uses instead. */
-interface QuoteResponse {
-  close?: string;
-  currency?: string;
-  timestamp?: number;
-  status?: string;
-  message?: string;
-}
+type Answer = { body: Record<string, unknown> } | { reason: string; limited?: boolean };
 
 /**
- * Ask the feed for one symbol.
+ * One request to the feed.
  *
- * Deliberately one request per symbol rather than a batch: a batch endpoint
- * that half-fails gives you a partial answer that is easy to mistake for a
- * complete one, and there are a handful of symbols here, not thousands.
+ * Alpha Vantage answers almost everything with HTTP 200: a bad symbol is
+ * `{"Error Message": …}`, and the daily limit is `{"Information": …}` or
+ * `{"Note": …}`. Trusting the status code would read the limit notice as an
+ * empty quote, so each of those is read and quoted as the reason.
  */
-async function fetchOne(
-  symbol: string,
-  key: string,
-  fetchImpl: typeof fetch,
-  now: () => Date,
-): Promise<FeedQuote | RejectedQuote> {
-  const { symbol: ticker, exchange } = feedSymbol(symbol);
-  const url =
-    `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(ticker)}` +
-    `&exchange=${encodeURIComponent(exchange)}&apikey=${encodeURIComponent(key)}`;
-
+async function ask(params: Record<string, string>, key: string, fetchImpl: typeof fetch): Promise<Answer> {
+  const query = new URLSearchParams({ ...params, apikey: key });
   let response: Response;
   try {
-    response = await fetchImpl(url, {
+    response = await fetchImpl(`https://www.alphavantage.co/query?${query}`, {
       headers: { accept: 'application/json' },
       signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
-    return {
-      symbol,
-      reason: `could not be fetched: ${error instanceof Error ? error.message : String(error)}`,
-    };
+    return { reason: `could not be fetched: ${error instanceof Error ? error.message : String(error)}` };
   }
 
-  // Read the body whatever the status. This provider puts the useful part —
-  // "symbol not found", "exchange not found", "plan does not include this" —
-  // in a JSON body served alongside a 404, so returning the status code alone
-  // throws away the only sentence that says what to change.
   const text = await response.text().catch(() => '');
-
-  let body: QuoteResponse;
+  let body: Record<string, unknown>;
   try {
-    body = JSON.parse(text) as QuoteResponse;
+    body = JSON.parse(text) as Record<string, unknown>;
   } catch {
     return {
-      symbol,
-      reason: response.ok
-        ? 'the feed did not return JSON'
-        : `the feed answered ${response.status}: ${text.slice(0, 160)}`,
+      reason: response.ok ? 'the feed did not return JSON' : `the feed answered ${response.status}: ${text.slice(0, 160)}`,
     };
   }
+  if (!response.ok) return { reason: `the feed answered ${response.status}` };
+  if (typeof body !== 'object' || body === null) return { reason: 'the feed returned something that is not a quote' };
 
-  if (!response.ok) {
-    return {
-      symbol,
-      reason: `the feed answered ${response.status}${body.message ? `: ${body.message}` : ''}`,
-    };
+  const error = body['Error Message'];
+  if (typeof error === 'string') return { reason: `the feed refused it: ${error}` };
+
+  const notice = body['Information'] ?? body['Note'];
+  if (typeof notice === 'string') {
+    return { reason: `the feed said: ${notice}`, limited: /per day|rate limit|limit|spreading out/i.test(notice) };
   }
 
-  // Twelve Data reports failures as a 200 with status:"error", so a bare
-  // status check would read a rate-limit notice as a price.
-  if (body.status === 'error') {
-    return { symbol, reason: body.message ?? 'the feed reported an error' };
+  return { body };
+}
+
+/** The currency the feed lists a symbol in, from its symbol search. */
+async function lookUpCurrency(
+  ticker: string,
+  listing: string,
+  key: string,
+  fetchImpl: typeof fetch,
+): Promise<{ currency: string } | { reason: string; limited?: boolean }> {
+  const answer = await ask({ function: 'SYMBOL_SEARCH', keywords: ticker }, key, fetchImpl);
+  if ('reason' in answer) return answer;
+
+  const matches = Array.isArray(answer.body['bestMatches']) ? (answer.body['bestMatches'] as Record<string, unknown>[]) : [];
+  const match = matches.find((m) => String(m['1. symbol'] ?? '').toUpperCase() === listing);
+  const currency = match?.['8. currency'];
+  if (typeof currency !== 'string' || currency === '') {
+    // Not found is not the same as pounds. Guessing here is the 100× mistake.
+    return { reason: `the feed does not list ${listing}, so its currency is unknown` };
   }
+  return { currency };
+}
 
-  const { close, currency } = body;
-  if (typeof close !== 'string' || typeof currency !== 'string') {
-    return { symbol, reason: 'the feed returned no price or no currency' };
+/**
+ * When a quote is from.
+ *
+ * The feed gives a trading day, not a time. It is stamped just after that day's
+ * London close, so a quote from Friday reads as Friday's close on Monday
+ * morning rather than claiming to be as fresh as the request.
+ */
+function stampFor(day: unknown, now: () => Date): Date {
+  if (typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    const stamp = new Date(`${day}T16:35:00Z`);
+    if (!Number.isNaN(stamp.getTime()) && stamp.getTime() <= now().getTime() + 86_400_000) return stamp;
   }
-
-  const price = Number(close);
-  const pence = toPence(price, currency);
-  if (typeof pence === 'string') return { symbol, reason: pence };
-
-  // The feed's own timestamp where it has one. A quote stamped with the moment
-  // it was fetched claims to be fresher than it is, and staleness is exactly
-  // what a mark needs to be honest about.
-  const asOf = typeof body.timestamp === 'number' ? new Date(body.timestamp * 1000) : now();
-
-  return { symbol: symbol.toUpperCase(), priceMinor: pence, asOf };
+  return now();
 }
 
 const isQuote = (value: FeedQuote | RejectedQuote): value is FeedQuote => 'priceMinor' in value;
+
+export interface FetchOptions {
+  book?: CurrencyBook;
+  /** Wait between requests. The free plan allows about one a second. */
+  pause?: (ms: number) => Promise<void>;
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export async function fetchQuotes(
   symbols: readonly string[],
   fetchImpl: typeof fetch = fetch,
   now: () => Date = () => new Date(),
   key = apiKey(),
+  { book = memoryBook(), pause = sleep }: FetchOptions = {},
 ): Promise<FeedResult> {
   if (!key) {
     // Not an error worth throwing: an unconfigured feed is a state the owner
@@ -205,13 +239,81 @@ export async function fetchQuotes(
         symbol,
         reason: 'no market data provider configured (set MARKET_DATA_API_KEY)',
       })),
+      requests: 0,
     };
   }
 
-  const settled = await Promise.all(symbols.map((symbol) => fetchOne(symbol, key, fetchImpl, now)));
+  const settled: (FeedQuote | RejectedQuote)[] = [];
+  let requests = 0;
+  let stoppedBy: string | null = null;
+
+  const request = async <T>(call: () => Promise<T>): Promise<T> => {
+    if (requests > 0) await pause(1_100);
+    requests += 1;
+    return call();
+  };
+
+  for (const raw of symbols) {
+    const symbol = raw.toUpperCase();
+    if (stoppedBy) {
+      settled.push({ symbol, reason: `not asked: ${stoppedBy}` });
+      continue;
+    }
+
+    const listing = feedSymbol(symbol);
+    if (typeof listing !== 'string') {
+      settled.push({ symbol, reason: listing.refused });
+      continue;
+    }
+    const ticker = listing.slice(0, -'.LON'.length);
+
+    // Currency first. A symbol already known to be quoted in dollars then
+    // costs nothing on later runs, instead of a quote request that will be
+    // refused anyway.
+    let currency = await book.get(symbol);
+    if (currency === undefined) {
+      const found = await request(() => lookUpCurrency(ticker, listing, key, fetchImpl));
+      if ('reason' in found) {
+        if ('limited' in found && found.limited) stoppedBy = 'the daily request limit was reached';
+        settled.push({ symbol, reason: found.reason });
+        continue;
+      }
+      currency = found.currency;
+      await book.set(symbol, listing, currency);
+    }
+
+    const unusable = toPence(1, currency);
+    if (typeof unusable === 'string') {
+      settled.push({ symbol, reason: unusable });
+      continue;
+    }
+
+    const answer = await request(() => ask({ function: 'GLOBAL_QUOTE', symbol: listing }, key, fetchImpl));
+    if ('reason' in answer) {
+      if (answer.limited) stoppedBy = 'the daily request limit was reached';
+      settled.push({ symbol, reason: answer.reason });
+      continue;
+    }
+
+    const quote = answer.body['Global Quote'];
+    const price = typeof quote === 'object' && quote !== null ? (quote as Record<string, unknown>)['05. price'] : undefined;
+    if (typeof price !== 'string') {
+      settled.push({ symbol, reason: `the feed returned no price for ${listing}` });
+      continue;
+    }
+
+    const pence = toPence(Number(price), currency);
+    if (typeof pence === 'string') {
+      settled.push({ symbol, reason: pence });
+      continue;
+    }
+
+    settled.push({ symbol, priceMinor: pence, asOf: stampFor((quote as Record<string, unknown>)['07. latest trading day'], now) });
+  }
 
   return {
     quotes: settled.filter(isQuote),
     rejected: settled.filter((r): r is RejectedQuote => !isQuote(r)),
+    requests,
   };
 }
