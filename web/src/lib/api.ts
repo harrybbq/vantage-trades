@@ -29,6 +29,23 @@ export interface AgentView {
   universe: string[];
   holdings: HoldingView[];
   unpricedSymbols: string[];
+  maxOrderPct: number;
+  dailyLossCapPct: number | null;
+  startedAt: string | null;
+  createdAt: string;
+  /** Today's gain or loss with money given or taken back removed. */
+  todayMinor: string | null;
+}
+
+export interface OwnershipView {
+  symbols: {
+    symbol: string;
+    owners: { agentId: string; qty: string }[];
+    ledgerQty: string;
+    brokerQty: string | null;
+  }[];
+  ledgerCashMinor: string;
+  brokerCashMinor: string | null;
 }
 
 export interface ControlPanelView {
@@ -46,6 +63,7 @@ export interface ControlPanelView {
   } | null;
   notice?: string;
   agents: AgentView[];
+  ownership: OwnershipView;
 }
 
 export interface CurvePoint {
@@ -84,9 +102,57 @@ export interface StatsView {
 
 export interface KillPreview {
   agentId: string;
-  positions: { symbol: string; qty: string; costBasisMinor: string }[];
+  positions: {
+    symbol: string;
+    qty: string;
+    costBasisMinor: string;
+    lastPriceMinor: string | null;
+    others: { agentId: string; qty: string }[];
+  }[];
   uninvestedCashMinor: string;
   summary: string;
+}
+
+export interface PerformancePoint {
+  date: string;
+  equityMinor: string;
+  shadowMinor: string | null;
+  putInMinor: string;
+  dayPnlMinor: string | null;
+  twrPct: number;
+  benchPct: number | null;
+  trades: number;
+}
+
+export interface PerformanceSeries {
+  id: string | null;
+  name: string;
+  status: string | null;
+  points: PerformancePoint[];
+}
+
+export interface Readiness {
+  tradingDays: number;
+  cleanStreak: number;
+  killTested: boolean;
+  agentsWithLimits: number;
+  agentsActive: number;
+  minTradingDays: number;
+  minCleanNights: number;
+}
+
+export interface PerformanceResponse {
+  performance: { benchmarkSymbol: string; fund: PerformanceSeries; agents: PerformanceSeries[] };
+  readiness: Readiness;
+}
+
+export interface ActivityItem {
+  at: string;
+  kind: 'fill' | 'control' | 'check' | 'money';
+  agentId: string | null;
+  title: string;
+  tags: string[];
+  amountMinor: string | null;
 }
 
 import { accessToken } from './auth';
@@ -148,6 +214,10 @@ export const fetchStats = (): Promise<StatsView> =>
 
 const post = <T>(body: Record<string, unknown>): Promise<T> =>
   request<T>({ method: 'POST', body: JSON.stringify(body) });
+
+export const fetchPerformance = () => post<PerformanceResponse>({ action: 'performance' });
+
+export const fetchActivity = () => post<{ items: ActivityItem[] }>({ action: 'activity' });
 
 /**
  * Run the reconciliation now.

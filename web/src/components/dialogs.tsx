@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { AgentView, KillPreview } from '../lib/api';
 import * as api from '../lib/api';
 import { formatGBP, formatQtyShort } from '../lib/format';
+import { capitalAdvice } from '../lib/guidance';
 import { Modal } from './Modal';
 
 interface Common {
@@ -19,7 +20,13 @@ interface Common {
    the same confirmation — a UI check is decoration.
    ------------------------------------------------------------------------- */
 
-export function KillDialog({ agent, onClose, onDone, onError }: Common & { agent: AgentView }) {
+export function KillDialog({
+  agent,
+  onClose,
+  onDone,
+  onError,
+  onHaltInstead,
+}: Common & { agent: AgentView; onHaltInstead?: () => void }) {
   const [preview, setPreview] = useState<KillPreview | null>(null);
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
@@ -63,36 +70,75 @@ export function KillDialog({ agent, onClose, onDone, onError }: Common & { agent
           <button
             className="btn-danger-solid"
             onClick={() => void confirm()}
-            disabled={busy || typed.trim() !== agent.id}
+            disabled={busy || preview === null || typed.trim() !== agent.id}
           >
-            {busy ? 'Standing down…' : 'Sell everything and stand down'}
+            {busy
+              ? 'Selling…'
+              : positions.length === 0
+                ? 'Stand down'
+                : `Sell ${positions.length} and stand down`}
           </button>
         </>
       }
     >
+      {onHaltInstead && (
+        <div className="halt-instead-box">
+          <span>
+            <b>Not sure?</b> Halt stops it without selling anything, and you can Resume later.
+          </span>
+          <button
+            onClick={() => {
+              onHaltInstead();
+              onClose();
+            }}
+            disabled={busy}
+          >
+            ❚❚ Halt instead
+          </button>
+        </div>
+      )}
       {preview === null ? (
         <p className="hint">Working out what would be sold…</p>
       ) : (
         <>
-          <p>
-            This sells <strong>all {positions.length} position{positions.length === 1 ? '' : 's'}</strong>{' '}
-            at market:
+          <p className="warn">
+            This sells every position at market now, then stands the agent down. It cannot be
+            undone, and any loss becomes real.
           </p>
-          <ul className="kill-list">
-            {positions.length === 0 ? (
-              <li>
-                <span>Nothing held</span>
-              </li>
-            ) : (
-              positions.map((p) => (
-                <li key={p.symbol}>
-                  <span>{p.symbol}</span>
-                  <span>{formatQtyShort(p.qty)}</span>
-                  <span>{formatGBP(p.costBasisMinor)}</span>
-                </li>
-              ))
-            )}
-          </ul>
+          <table className="kill-table">
+            <thead>
+              <tr>
+                <th>Sell</th>
+                <th>Qty</th>
+                <th>Last price</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.length === 0 ? (
+                <tr>
+                  <td colSpan={4}>Nothing held</td>
+                </tr>
+              ) : (
+                positions.map((p) => (
+                  <tr key={p.symbol}>
+                    <td>
+                      {p.symbol}
+                      {p.others.length > 0 && (
+                        <small>
+                          Only its own {formatQtyShort(p.qty)}.{' '}
+                          {p.others.map((o) => `${o.agentId} keeps its ${formatQtyShort(o.qty)}`).join('; ')}.
+                        </small>
+                      )}
+                    </td>
+                    <td className="num">{formatQtyShort(p.qty)}</td>
+                    <td className="num">{p.lastPriceMinor === null ? '—' : formatGBP(p.lastPriceMinor)}</td>
+                    <td className="num">{formatGBP(p.costBasisMinor)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
           {/* Unknown is said as unknown. Showing the cash alone here understated
               the return by the value of every unpriced holding. */}
           <p>
@@ -100,22 +146,16 @@ export function KillDialog({ agent, onClose, onDone, onError }: Common & { agent
               <>
                 At least <strong>{formatGBP(agent.cashMinor)}</strong> returns to the unallocated
                 pool, plus whatever {agent.unpricedSymbols.join(', ')} sell for. They have no
-                price, so they will not be sold until they do.
+                price, so they are left unsold, and the agent stays "being killed", until they
+                have one.
               </>
             ) : (
               <>
                 Roughly <strong>{formatGBP(agent.equityMinor)}</strong> returns to the unallocated
-                pool.
+                pool. An estimate at the last price; the actual sales will differ by the spread.
               </>
             )}
           </p>
-          <p className="warn">This realises any losses and cannot be undone.</p>
-          {positions.length > 0 && (
-            <p className="hint">
-              Positions have to be liquidated before the agent can stand down. Until they are, this
-              will be refused.
-            </p>
-          )}
           <label className="field">
             <span className="label">
               Type <span className="num">{agent.id}</span> to confirm
@@ -142,12 +182,15 @@ export function KillDialog({ agent, onClose, onDone, onError }: Common & { agent
 export function CapitalDialog({
   agent,
   poolMinor,
+  view,
   onClose,
   onDone,
   onError,
-}: Common & { agent: AgentView; poolMinor: string }) {
-  const [amount, setAmount] = useState('500.00');
+}: Common & { agent: AgentView; poolMinor: string; view: api.ControlPanelView }) {
+  const [amount, setAmount] = useState('250.00');
   const [busy, setBusy] = useState(false);
+  const give = capitalAdvice(agent, view, amount, true);
+  const back = capitalAdvice(agent, view, amount, false);
 
   const run = async (direction: 'allocate' | 'return') => {
     setBusy(true);
@@ -174,11 +217,15 @@ export function CapitalDialog({
           <button onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button onClick={() => void run('return')} disabled={busy}>
+          <button onClick={() => void run('return')} disabled={busy || back.level === 'stop'}>
             Return to pool
           </button>
-          <button className="btn-primary" onClick={() => void run('allocate')} disabled={busy}>
-            Allocate
+          <button
+            className="btn-primary"
+            onClick={() => void run('allocate')}
+            disabled={busy || give.level === 'stop'}
+          >
+            Give capital
           </button>
         </>
       }
@@ -197,9 +244,13 @@ export function CapitalDialog({
           placeholder="500.00"
         />
       </label>
+      <div className={`advice advice-${give.level}`} role="status">
+        <b>{give.title}</b>
+        {give.detail}
+      </div>
       <p className="hint">
         Unallocated pool: <span className="num">{formatGBP(poolMinor)}</span>. Returning capital
-        only moves uninvested cash — anything already in positions has to be unwound first.
+        only moves uninvested cash — anything already in shares has to be sold first.
       </p>
     </Modal>
   );

@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:web": "vitest run -c vitest.web.config.ts",
     "db:reset": "./scripts/db-reset.sh",
     "demo": "tsx src/jobs/demo.ts",
     "job:reconcile": "tsx src/jobs/daily-reconcile.ts",
@@ -27,11 +28,15 @@
     "token:revoke": "tsx src/jobs/report-token.ts revoke"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.7.0",
+    "jsdom": "^25.0.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^5.4.21",

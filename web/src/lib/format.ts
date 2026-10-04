@@ -53,3 +53,42 @@ export function directionClass(value: number | null): string {
   if (value === null) return 'na';
   return value >= 0 ? 'up' : 'down';
 }
+
+/** Signed pounds: `+£12.40`, `−£4.10`. A real minus sign, not a hyphen. */
+export function formatSigned(minor: string | null): string {
+  if (minor === null) return '—';
+  const text = formatGBP(minor);
+  if (minor.startsWith('-')) return `−${text.slice(1)}`;
+  return /^-?0+$/.test(minor) ? text : `+${text}`;
+}
+
+/** Signed percent with an arrow, so the direction never rests on colour. */
+export function formatPctArrow(value: number | null, dp = 2): string {
+  if (value === null) return '—';
+  if (Math.abs(value) < 10 ** -dp / 2) return `${(0).toFixed(dp)}%`;
+  return `${value > 0 ? '▲ +' : '▼ −'}${Math.abs(value).toFixed(dp)}%`;
+}
+
+/** Percentage points: the gap between two returns. */
+export function formatPp(value: number | null, dp = 1): string {
+  if (value === null) return '—';
+  if (Math.abs(value) < 10 ** -dp / 2) return `${(0).toFixed(dp)} pp`;
+  return `${value > 0 ? '▲ +' : '▼ −'}${Math.abs(value).toFixed(dp)} pp`;
+}
+
+export function dirOf(value: number | null): 'up' | 'down' | 'flat' | 'unk' {
+  if (value === null) return 'unk';
+  return value > 0 ? 'up' : value < 0 ? 'down' : 'flat';
+}
+
+/** `2026-10-02` → `Fri 2 Oct`. */
+export function formatDay(day: string): string {
+  const d = new Date(`${day}T12:00:00Z`);
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
+/** `2026-10-02` → `2 Oct`. */
+export function formatDayShort(day: string): string {
+  const d = new Date(`${day}T12:00:00Z`);
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+}

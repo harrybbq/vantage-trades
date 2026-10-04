@@ -46,6 +46,8 @@ export interface AgentView {
   /** The day's loss, as a percent, at which it halts itself. Null: no cap. */
   dailyLossCapPct: number | null;
   startedAt: string | null;
+  /** When it was created. The panel's colour for an agent follows this. */
+  createdAt: string;
   /**
    * Today's gain or loss in pence, with money given or taken back since the
    * last close removed first. Without that, a £500 top-up read as a £500 day.
@@ -218,10 +220,10 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
   const closes = await priorClose(tx);
 
   const names = await tx.query<{
-    id: string; name: string; max_order_pct: string; daily_loss_cap_pct: string | null; started_at: Date | null;
+    id: string; name: string; max_order_pct: string; daily_loss_cap_pct: string | null; started_at: Date | null; created_at: Date;
   }>(
     `select id, name, max_order_pct::text as max_order_pct,
-            daily_loss_cap_pct::text as daily_loss_cap_pct, started_at
+            daily_loss_cap_pct::text as daily_loss_cap_pct, started_at, created_at
        from ledger.agents`,
   );
   const nameById = new Map(names.rows.map((r) => [r.id, r.name]));
@@ -257,6 +259,7 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
       dailyLossCapPct:
         railsById.get(e.agentId)?.daily_loss_cap_pct == null ? null : Number(railsById.get(e.agentId)!.daily_loss_cap_pct),
       startedAt: railsById.get(e.agentId)?.started_at?.toISOString() ?? null,
+      createdAt: railsById.get(e.agentId)?.created_at.toISOString() ?? '',
       todayMinor: e.equityMinor === null || close === undefined ? null : (e.equityMinor - close).toString(),
     };
   });
