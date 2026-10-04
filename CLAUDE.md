@@ -357,8 +357,11 @@ single-JSON-state design, deliberately.
   trading through it needs an FX account and a decision about which rate
   applies when — real work, before the first fill, not a config change.
   IBKR can hold GBP directly and avoids it. See `docs/LEDGER.md`.
-- Whether agents may hold the same symbol simultaneously, or whether the
-  factory enforces exclusive ownership per symbol. Simplifies attribution
-  and reduces accidental concentration, at the cost of flexibility.
+- **Decided:** agents may hold the same symbol. Kill sells only the killed
+  agent's own attributed quantity, never the broker's total, so another
+  agent's shares in the same symbol are untouched (`src/pipeline/kill.ts`).
+- **Decided:** prices come from Alpha Vantage (free key, London listings,
+  25 requests a day). Twelve Data's free plan does not cover the LSE. See
+  `docs/DEPLOY.md`.
 - What "start" does to an agent that was killed — fresh cost basis, or
   resumed history for its P/L-since-start figure.

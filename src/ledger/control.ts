@@ -165,10 +165,10 @@ export async function beginKill(tx: Sql, agentId: string, actor: string): Promis
   const from = await currentStatus(tx, agentId);
   if (from === 'killed') throw new Error(`agent ${agentId} is already killed`);
 
-  const open = await tx.query<{ symbol: string; side: string; status: string }>(
+  const open = await tx.query<{ symbol: string; side: string; status: string; acked: boolean }>(
     // Open means not yet fully filled, whatever the status column says: the
     // status can lag the fills, and a filled order is no risk of a double sale.
-    `select o.symbol, o.side, o.status from ledger.orders o
+    `select o.symbol, o.side, o.status, o.broker_order_id is not null as acked from ledger.orders o
       where o.agent_id = $1 and o.status in ('pending', 'submitted', 'partially_filled')
         and coalesce((select sum(f.qty) from ledger.fills f where f.order_id = o.id), 0) < o.qty
       order by o.created_at`,
@@ -176,9 +176,17 @@ export async function beginKill(tx: Sql, agentId: string, actor: string): Promis
   );
   if (open.rows.length > 0) {
     const list = open.rows.map((o) => `${o.side} ${o.symbol} (${o.status})`).join(', ');
+    // An order the broker never acknowledged will not settle by waiting: it
+    // is an orphan, and only asking the broker says whether it exists.
+    const orphans = open.rows.filter((o) => !o.acked).length;
     throw new Error(
       `agent ${agentId} has ${open.rows.length} order(s) still open: ${list}. Selling now could ` +
-        'sell the same shares twice. Wait for them to settle, then press Kill again.',
+        'sell the same shares twice. ' +
+        (orphans > 0
+          ? `${orphans} of them never got the broker's acknowledgement, so waiting will not settle ` +
+            'them — check the broker for them by hand first. '
+          : 'Wait for them to settle, then press Kill again. ') +
+        'Halt still works in the meantime.',
     );
   }
 

@@ -125,6 +125,9 @@ function ControlPanel() {
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
+  // Something the server wants read about the action just taken — a kill
+  // that could not finish, say. Not an error: the action did something.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -185,7 +188,9 @@ function ControlPanel() {
   const run = async (action: () => Promise<ControlPanelView>) => {
     setBusy(true);
     try {
-      setView(await action());
+      const next = await action();
+      setView(next);
+      setNotice(next.notice ?? null);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'that did not work');
@@ -196,6 +201,7 @@ function ControlPanel() {
   const closeDialog = () => setDialog(null);
   const applyView = (next: ControlPanelView) => {
     setView(next);
+    setNotice(next.notice ?? null);
     setError(null);
   };
 
@@ -263,6 +269,15 @@ function ControlPanel() {
           Performance
         </button>
       </nav>
+
+      {notice && (
+        <div className="banner-error" style={{ background: 'var(--halt-bg)', borderColor: 'var(--halt)' }}>
+          <span>{notice}</span>
+          <button className="btn-sm" onClick={() => setNotice(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="banner-error">

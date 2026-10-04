@@ -54,23 +54,32 @@ async function holdings(agentId: string): Promise<{ symbol: string; qty: Qty }[]
 export async function kill(broker: BrokerAdapter, agentId: string, actor: string): Promise<KillOutcome> {
   await syncFills(broker);
 
-  const owned = await holdings(agentId);
-
   // A market sell with no price to fill at would be refused by the simulator
   // and filled at anything by a real broker. Neither is a sale worth making
-  // blind, so an unpriced holding is left for a second attempt.
-  const quotes = owned.length ? await broker.getQuotes(owned.map((h) => h.symbol)) : [];
+  // blind, so an unpriced holding is left for a second attempt. Prices are
+  // asked for before the lock, so no transaction waits on the broker.
+  const preview = await holdings(agentId);
+  const quotes = preview.length ? await broker.getQuotes(preview.map((h) => h.symbol)) : [];
   const priced = new Set(quotes.map((q) => q.symbol.toUpperCase()));
-  const unsold: KillOutcome['unsold'] = owned
-    .filter((h) => !priced.has(h.symbol))
-    .map((h) => ({ ...h, reason: 'no price, so it cannot be sold safely yet' }));
-  const toSell = owned.filter((h) => priced.has(h.symbol));
 
   const attempt = randomUUID();
+  const unsold: KillOutcome['unsold'] = [];
+  let owned: { symbol: string; qty: Qty }[] = [];
   const orders = await inTransaction(async (tx) => {
     await beginKill(tx, agentId, actor);
+    // What it owns, read again under the lock: nothing can fill for this
+    // agent between this read and the sells being written.
+    const r = await tx.query<{ symbol: string; qty: string }>(
+      `select symbol, qty::text as qty from ledger.agent_positions where agent_id = $1 order by symbol`,
+      [agentId],
+    );
+    owned = r.rows.map((row) => ({ symbol: row.symbol, qty: parseQty(row.qty) }));
+    for (const h of owned.filter((o) => !priced.has(o.symbol))) {
+      unsold.push({ ...h, reason: 'no price, so it cannot be sold safely yet' });
+    }
+
     const written: { orderId: string; symbol: string; qty: Qty; key: string }[] = [];
-    for (const h of toSell) {
+    for (const h of owned.filter((o) => priced.has(o.symbol))) {
       const key = `kill:${agentId}:${attempt}:${h.symbol}`;
       const orderId = await createOrder(tx, { agentId, symbol: h.symbol, side: 'sell', qty: h.qty, idempotencyKey: key });
       written.push({ orderId, symbol: h.symbol, qty: h.qty, key });

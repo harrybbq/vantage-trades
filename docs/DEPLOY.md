@@ -43,7 +43,7 @@ extensions, no roles, no grants, never changes `search_path`, and never
 references `public`. Every one of its tables has row-level security enabled
 **and forced** with no policies, so even a leaked anon key reads nothing.
 
-Verified rather than assumed: all eight migrations applied into a database
+Verified rather than assumed: the first eight migrations applied into a database
 that already held other tables, then the full test suite ran against it, and
 the other tables and their rows were untouched.
 
@@ -77,8 +77,14 @@ tables were untouched.
 
 It is generated from `supabase/migrations/` by
 `scripts/build-install-sql.sh`, so it cannot drift from them. If you prefer,
-applying the eight migration files by hand in numerical order does the same
+applying the migration files by hand in numerical order does the same
 thing — they are not idempotent and each depends on the last.
+
+**On a database that already has the ledger**, `install.sql` will refuse (its
+first `create` fails and the whole thing rolls back, touching nothing). Apply
+only the migrations it does not have yet, in order. `0009` adds the price
+feed's currency table and `0010` the `killing` status and
+`ledger.orders.reject_reason`; the code expects both.
 
 Expect:
 

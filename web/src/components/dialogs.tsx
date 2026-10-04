@@ -93,9 +93,21 @@ export function KillDialog({ agent, onClose, onDone, onError }: Common & { agent
               ))
             )}
           </ul>
+          {/* Unknown is said as unknown. Showing the cash alone here understated
+              the return by the value of every unpriced holding. */}
           <p>
-            Roughly <strong>{formatGBP(agent.equityMinor ?? agent.cashMinor)}</strong> returns to the
-            unallocated pool.
+            {agent.equityMinor === null ? (
+              <>
+                At least <strong>{formatGBP(agent.cashMinor)}</strong> returns to the unallocated
+                pool, plus whatever {agent.unpricedSymbols.join(', ')} sell for. They have no
+                price, so they will not be sold until they do.
+              </>
+            ) : (
+              <>
+                Roughly <strong>{formatGBP(agent.equityMinor)}</strong> returns to the unallocated
+                pool.
+              </>
+            )}
           </p>
           <p className="warn">This realises any losses and cannot be undone.</p>
           {positions.length > 0 && (

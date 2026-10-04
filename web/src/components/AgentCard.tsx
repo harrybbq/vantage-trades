@@ -108,7 +108,8 @@ export function AgentCard({
                 <div className="holding" key={h.symbol}>
                   <span className="holding-sym">{h.symbol}</span>
                   <span className="holding-qty">{formatQtyShort(h.qty)}</span>
-                  <span>{formatGBP(h.marketValueMinor ?? h.costBasisMinor)}</span>
+                  {/* No price means unknown, never "worth what it cost". */}
+                  <span>{h.marketValueMinor === null ? '—' : formatGBP(h.marketValueMinor)}</span>
                 </div>
               ))
             )}
@@ -131,7 +132,9 @@ export function AgentCard({
               Universe
             </button>
             <span className="spacer" />
-            {agent.status === 'running' ? (
+            {agent.status === 'killing' ? (
+              <span className="hint">Being killed: it can only sell. Kill again to finish.</span>
+            ) : agent.status === 'running' ? (
               // Not disabled while busy: halting can only ever reduce what an
               // agent does, so it must not wait behind a slow reconcile.
               <button className="btn-sm" onClick={onHalt}>

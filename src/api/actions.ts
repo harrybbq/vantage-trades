@@ -173,7 +173,13 @@ export async function doReconcileNow(
     console.warn(`no price for ${symbol}: ${reason}`);
   }
 
-  await runDailyReconcile(tradingBroker());
+  let broker;
+  try {
+    broker = tradingBroker();
+  } catch (error) {
+    throw new ValidationError(error instanceof Error ? error.message : String(error));
+  }
+  await runDailyReconcile(broker);
 
   // Whatever it decided is now the newest row, and the view reads it back —
   // so the panel shows the result rather than this function's opinion of it.
@@ -294,11 +300,13 @@ export async function doKill(
     );
   }
 
-  const outcome = await kill(tradingBroker(), agentId, actor).catch((error: unknown) => {
-    // A refusal from the checks — an open order, an already-killed agent — is
-    // the owner's to read, not a server fault.
-    throw new ValidationError(error instanceof Error ? error.message : String(error));
-  });
+  const outcome = await Promise.resolve()
+    .then(() => kill(tradingBroker(), agentId, actor))
+    .catch((error: unknown) => {
+      // A refusal from the checks — an open order, an already-killed agent,
+      // BROKER=live with no adapter — is the owner's to read, not a fault.
+      throw new ValidationError(error instanceof Error ? error.message : String(error));
+    });
   const view = await inTransaction((tx) => controlPanelView(tx));
   return { ...view, notice: outcome.summary };
 }

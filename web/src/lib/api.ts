@@ -17,7 +17,7 @@ export interface HoldingView {
 export interface AgentView {
   id: string;
   name: string;
-  status: 'idle' | 'running' | 'halted' | 'killed';
+  status: 'idle' | 'running' | 'halted' | 'killing' | 'killed';
   allocatedMinor: string;
   cashMinor: string;
   deployedMinor: string;
@@ -37,7 +37,14 @@ export interface ControlPanelView {
   unallocatedMinor: string;
   allocatedMinor: string;
   todayMinor: string | null;
-  reconciliation: { status: 'ok' | 'diverged' | 'error'; asOf: string; summary: string } | null;
+  reconciliation: {
+    status: 'ok' | 'diverged' | 'error';
+    asOf: string;
+    summary: string;
+    runAt: string;
+    stale: boolean;
+  } | null;
+  notice?: string;
   agents: AgentView[];
 }
 
