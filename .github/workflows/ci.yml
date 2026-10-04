@@ -63,7 +63,14 @@ jobs:
         run: npm test
 
       # Catches anything that typechecks but will not bundle.
+      # Placeholders, not secrets. The build refuses on any hosting platform
+      # without a well-formed sign-in config — rightly, for a deploy — and a CI
+      # runner counts as one, so without these this step had failed on every
+      # commit. Nothing is signed in to; the bundle is only built.
       - name: Build the control panel
+        env:
+          VITE_SUPABASE_URL: https://ciplaceholderprojectref.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_ci_placeholder_not_a_real_key
         run: npm run build
 
       # And the half `npm run build` does not touch. A function can typecheck,
