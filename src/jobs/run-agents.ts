@@ -17,29 +17,50 @@ import { closePool, getPool, inTransaction } from '../db.js';
 import { PaperBroker } from '../broker/paper.js';
 import type { BrokerAdapter } from '../broker/types.js';
 import { SmaCrossover } from '../agents/sma.js';
+import { HoldBenchmark } from '../agents/hold.js';
 import { tick } from '../agents/runner.js';
 import type { Strategy } from '../agents/types.js';
 
+export interface RunningAgent {
+  id: string;
+  /** `ledger.agents.strategy`. */
+  strategy: string;
+}
+
 /**
- * Which strategy each agent runs.
+ * The rule each agent runs, from its row.
  *
- * A map rather than a column on the agent, for now: wiring a strategy name
- * from the database to a constructor is an indirection that only earns its
- * keep once there is more than one strategy worth running.
+ * An unknown name runs nothing at all rather than falling back to some
+ * default: a rule the owner did not choose must not trade their money.
  */
-function strategyFor(_agentId: string): Strategy {
-  return new SmaCrossover();
+export function strategyFor(agent: RunningAgent): Strategy {
+  switch (agent.strategy) {
+    case 'hold':
+      return new HoldBenchmark();
+    case 'sma':
+      return new SmaCrossover();
+    default:
+      throw new Error(`agent ${agent.id} has an unknown strategy "${agent.strategy}"; it was not run`);
+  }
+}
+
+/** Something from a run that the owner should be told about. */
+export interface AgentEvent {
+  agentId: string;
+  kind: 'halted-itself' | 'failed';
+  detail: string;
 }
 
 export async function runAllAgents(
   broker: BrokerAdapter,
-  pick: (agentId: string) => Strategy = strategyFor,
+  pick: (agent: RunningAgent) => Strategy = strategyFor,
+  onEvent: (event: AgentEvent) => void = () => undefined,
 ): Promise<number> {
   const agents = await inTransaction(async (tx) => {
-    const result = await tx.query<{ id: string }>(
-      `select id from ledger.agents where status = 'running' order by id`,
+    const result = await tx.query<RunningAgent>(
+      `select id, strategy from ledger.agents where status = 'running' order by id`,
     );
-    return result.rows.map((r) => r.id);
+    return result.rows;
   });
 
   if (agents.length === 0) {
@@ -50,21 +71,23 @@ export async function runAllAgents(
   let acted = 0;
   const failures: string[] = [];
 
-  for (const agentId of agents) {
-    const strategy = pick(agentId);
+  for (const agent of agents) {
+    const agentId = agent.id;
     // One agent throwing used to end the run for every agent after it.
     let outcome: Awaited<ReturnType<typeof tick>>;
     try {
-      outcome = await tick(broker, strategy, agentId);
+      outcome = await tick(broker, pick(agent), agentId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`${agentId}: TICK FAILED - ${message}`);
       failures.push(`${agentId}: ${message}`);
+      onEvent({ agentId, kind: 'failed', detail: message });
       continue;
     }
 
     if (outcome.selfHalted) {
       console.warn(`${agentId}: HALTED ITSELF - ${outcome.selfHalted}`);
+      onEvent({ agentId, kind: 'halted-itself', detail: outcome.selfHalted });
       continue;
     }
     if (!outcome.ran) {

@@ -70,6 +70,8 @@ export interface Verdict {
   options?: string[];
 }
 
+export const isHold = (agent: AgentView) => agent.strategy === 'hold';
+
 export function verdictFor(agent: AgentView, points: readonly PerformancePoint[]): Verdict {
   if (agent.status === 'killing') {
     return {
@@ -89,6 +91,16 @@ export function verdictFor(agent: AgentView, points: readonly PerformancePoint[]
       ],
     };
   }
+  if (isHold(agent) && agent.status === 'running') {
+    const invested = agent.holdings.length > 0;
+    return {
+      tone: 'ready',
+      title: 'Nothing to judge: this is the benchmark',
+      body: invested
+        ? 'It holds VWRP and makes no decisions. It will track VWRP, a little behind because buying cost something. Leave it alone; every other agent is measured against it.'
+        : 'It buys VWRP at the next morning run and then holds it. It makes no other decisions.',
+    };
+  }
   if (agent.status === 'idle') {
     if (BigInt(agent.allocatedMinor) <= 0n) {
       return { tone: 'ready', title: 'Needs capital', body: 'Give it some capital from the pool. It cannot buy anything until it has a budget.' };
@@ -99,7 +111,9 @@ export function verdictFor(agent: AgentView, points: readonly PerformancePoint[]
     return {
       tone: 'ready',
       title: 'Ready to start',
-      body: `It has capital and ${agent.universe.length} share${agent.universe.length === 1 ? '' : 's'} it may trade. Starting begins its paper record. Nothing real is at risk.`,
+      body: isHold(agent)
+        ? 'It has capital. Once started it buys VWRP at the next morning run and holds it. Nothing real is at risk.'
+        : `It has capital and ${agent.universe.length} share${agent.universe.length === 1 ? '' : 's'} it may trade. Starting begins its paper record. Nothing real is at risk.`,
     };
   }
 
@@ -197,7 +211,10 @@ export function nextStep(view: ControlPanelView, integrity: IntegrityState): Nex
     return { title: 'Record your first bank transfer', why: 'Nothing can happen until the pot has money in it. In paper mode this is pretend money: record any amount you would one day be willing to trade with.' };
   }
   if (live.length === 0) {
-    return { title: 'Add your first agent', why: 'An agent starts idle, with no capital and no share list, and places nothing until you give it both.' };
+    return {
+      title: 'Add your first agent',
+      why: 'Start with a "Hold VWRP" agent. It simply buys the global index fund and keeps it, which is the result every other agent has to beat. It starts idle and places nothing until you give it capital and start it.',
+    };
   }
   const killing = live.find((a) => a.status === 'killing');
   if (killing) return { title: `Finish killing ${killing.name}`, why: 'It is part-way through being killed and can only sell. Press Kill on it again to sell what is left.' };
@@ -222,6 +239,13 @@ export function nextStep(view: ControlPanelView, integrity: IntegrityState): Nex
     return { title: 'Get a fresh check', why: integrity.detail, steps: ['Press Check now.', 'If it keeps failing, the nightly job may have stopped: see /api/health.'] };
   }
   if (integrity.level === 'stale') return { title: 'Wait for tonight’s prices', why: integrity.detail };
+  if (view.alerts.channel === null && live.some((a) => a.status === 'running')) {
+    return {
+      title: 'Set up alerts, so you do not have to check',
+      why: 'Agents are running and nothing tells you if a check fails or one halts itself. With alerts on, silence means everything is fine, and you get a summary each Saturday.',
+      steps: ['Install the free ntfy app on your phone and subscribe to a long, random topic name.', 'Put that name in Netlify as ALERT_NTFY_TOPIC and redeploy.', 'Press "Send a test alert" at the bottom of this page.'],
+    };
+  }
   return { title: 'Nothing needs you today', why: 'Checking once a day is plenty. Agents only act a few times a day, and more watching tends to mean more meddling.' };
 }
 
@@ -243,6 +267,11 @@ export interface CapitalAdvice {
 export function capitalAdvice(agent: AgentView, view: ControlPanelView, addText: string, giving: boolean): CapitalAdvice {
   const add = parsePence(addText);
   if (add === null || add <= 0n) return { level: 'stop', title: 'Enter an amount above zero, like 250 or 250.00.', detail: '' };
+  if (giving && isHold(agent)) {
+    return add > BigInt(view.unallocatedMinor)
+      ? { level: 'stop', title: `The pool only has £${(BigInt(view.unallocatedMinor) / 100n).toLocaleString('en-GB')}.`, detail: 'To give more, record a bank transfer in first, or take capital back from another agent.' }
+      : { level: 'ok', title: 'This agent just buys VWRP and holds it.', detail: 'It is the benchmark, so there is no size limit to suggest. It buys at the next morning run.' };
+  }
 
   const pool = BigInt(view.unallocatedMinor);
   const fund = pool + BigInt(view.allocatedMinor);
@@ -287,6 +316,40 @@ export interface Check {
   progress: string;
 }
 
+/* ---------- Limits advice ---------- */
+
+export function limitsAdvice(agent: AgentView, capText: string | null, orderText: string): CapitalAdvice {
+  const alloc = BigInt(agent.allocatedMinor);
+  const pounds = (pctText: string) => {
+    const hundredths = parsePence(pctText); // "2.5" → 250: percent in hundredths
+    return hundredths === null ? null : (alloc * hundredths) / 10000n;
+  };
+  const order = parsePence(orderText);
+  if (order === null || order <= 0n || order > 10000n) return { level: 'stop', title: 'The largest order must be between 1 and 100 percent.', detail: '' };
+  if (capText !== null) {
+    const cap = parsePence(capText);
+    if (cap === null || cap <= 0n || cap > 10000n) return { level: 'stop', title: 'The daily loss cap must be above 0 and at most 100 percent.', detail: '' };
+  }
+  const gbp = (minor: bigint | null) => (minor === null ? '—' : `£${(Number(minor) / 100).toFixed(2)}`);
+  const orderLine = `No single purchase can be bigger than ${gbp(pounds(orderText))}.`;
+
+  if (capText === null) {
+    return isHold(agent)
+      ? { level: 'ok', title: 'No daily loss cap, which is right for this agent.', detail: `It makes no decisions for a cap to stop. ${orderLine}` }
+      : { level: 'warn', title: 'With no cap, nothing stops it after a bad day.', detail: `The real-money checklist asks for a cap on every agent that trades. ${orderLine}` };
+  }
+  const capPounds = pounds(capText);
+  const capPct = Number(capText);
+  if (capPct > 10) {
+    return { level: 'warn', title: `A ${capPct}% cap lets it lose about ${gbp(capPounds)} in one day before it stops.`, detail: `Most people starting out use 2 to 5 percent. ${orderLine}` };
+  }
+  return {
+    level: 'ok',
+    title: `If it loses about ${gbp(capPounds)} in a day, it stops trading until you press Resume.`,
+    detail: `That limits what it does, not what the market does: what it already holds can still fall further. ${orderLine}`,
+  };
+}
+
 export function readinessChecks(r: Readiness, leads: (LeadSummary | null)[]): Check[] {
   const outside = leads.filter((l) => l && l.days >= JUDGE_AFTER_DAYS && !l.inside && l.leadPp > 0).length;
   return [
@@ -294,6 +357,6 @@ export function readinessChecks(r: Readiness, leads: (LeadSummary | null)[]): Ch
     { ok: r.cleanStreak >= r.minCleanNights, label: `The ledger matched the broker every night for ${r.minCleanNights} nights in a row`, hint: 'Proves the money tracking is right before trusting any number.', progress: `${Math.min(r.cleanStreak, r.minCleanNights)} / ${r.minCleanNights}` },
     { ok: outside > 0, label: 'An agent’s lead over VWRP has left the luck band, after all costs', hint: outside > 0 ? 'At least one has. Encouraging, not proof.' : 'None has yet.', progress: `${outside} / ${leads.length}` },
     { ok: r.killTested, label: 'Kill tried on paper, with an agent holding shares', hint: 'So the first real Kill is not the first Kill.', progress: r.killTested ? 'done' : 'not yet' },
-    { ok: r.agentsActive > 0 && r.agentsWithLimits === r.agentsActive, label: 'A daily loss cap set on every agent', hint: 'So a bad day ends with the agent stopping itself.', progress: `${r.agentsWithLimits} / ${r.agentsActive}` },
+    { ok: r.agentsActive > 0 && r.agentsWithLimits === r.agentsActive, label: 'A daily loss cap set on every agent that trades', hint: 'So a bad day ends with the agent stopping itself. A Hold VWRP agent needs none.', progress: `${r.agentsWithLimits} / ${r.agentsActive}` },
   ];
 }

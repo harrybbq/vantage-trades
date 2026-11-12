@@ -23,6 +23,7 @@ export function agent(over: Partial<AgentView> = {}): AgentView {
     dailyLossCapPct: 3,
     startedAt: '2026-08-25T09:00:00.000Z',
     createdAt: '2026-08-25T08:00:00.000Z',
+    strategy: 'sma',
     todayMinor: '-410',
     ...over,
   };
@@ -38,6 +39,8 @@ export function view(over: Partial<ControlPanelView> = {}): ControlPanelView {
     reconciliation: { status: 'ok', asOf: '2026-10-02T22:37:00.000Z', runAt: '2026-10-02T22:37:00.000Z', summary: 'clean', stale: false },
     agents: [agent()],
     ownership: { symbols: [], ledgerCashMinor: '0', brokerCashMinor: '0' },
+    alerts: { channel: 'push' },
+    benchmarkSymbol: 'VWRP',
     ...over,
   };
 }

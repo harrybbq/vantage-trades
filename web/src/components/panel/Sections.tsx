@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ActivityItem, AgentView, ControlPanelView, PerformanceSeries, Readiness } from '../../lib/api';
 import { dirOf, formatDay, formatGBP, formatPctArrow, formatPp, formatQtyShort, formatSigned, signOf } from '../../lib/format';
 import {
+  isHold,
   JUDGE_AFTER_DAYS,
   leadSummary,
   readinessChecks,
@@ -43,7 +44,7 @@ function Pill({ status }: { status: AgentView['status'] }) {
 /** Today's loss against the cap: a bullet graph, not a progress bar, because filling up is bad. */
 function LossBullet({ lossPence, capPence }: { lossPence: bigint | null; capPence: bigint | null }) {
   if (capPence === null || capPence <= 0n) {
-    return <div className="sub">No daily loss cap set.</div>;
+    return null;
   }
   const cap = Number(capPence);
   const max = cap * 1.15;
@@ -402,6 +403,7 @@ function Calendar({ series }: { series: PerformanceSeries }) {
 }
 
 interface AgentActions {
+  onLimits: () => void;
   onCapital: () => void;
   onUniverse: () => void;
   onHalt: () => void;
@@ -483,7 +485,11 @@ export function AgentPanel({ agent, color, series, busy, first, ...act }: { agen
           <div className="sub">
             {agent.status === 'halted'
               ? 'Halted, so it cannot trade today. What it holds still moves with the market.'
-              : `The black tick is the cap: ${agent.dailyLossCapPct ?? '—'}% of the day's opening value, shown here against its allocation.`}
+              : cap === null
+                ? isHold(agent)
+                  ? 'None, on purpose: it makes no decisions for a cap to stop.'
+                  : 'Nothing stops it after a bad day. Set one with Limits.'
+                : `The black tick is the cap: ${agent.dailyLossCapPct}% of the day's opening value, shown here against its allocation.`}
           </div>
         </div>
         <div className="limit">
@@ -563,8 +569,13 @@ export function AgentPanel({ agent, color, series, busy, first, ...act }: { agen
         <button className="btn v-sm" onClick={act.onCapital} disabled={busy || agent.status === 'killing'}>
           Capital
         </button>
-        <button className="btn v-sm" onClick={act.onUniverse} disabled={busy}>
-          Universe
+        {!isHold(agent) && (
+          <button className="btn v-sm" onClick={act.onUniverse} disabled={busy}>
+            Universe
+          </button>
+        )}
+        <button className="btn v-sm" onClick={act.onLimits} disabled={busy || agent.status === 'killing'}>
+          Limits
         </button>
         <span className="spacer" />
         {agent.status === 'running' ? (
@@ -592,6 +603,7 @@ export function Ownership({ view, colors }: { view: ControlPanelView; colors: Ma
   const o = view.ownership;
   if (o.symbols.length === 0) return <div className="why">Nothing held yet.</div>;
   return (
+    <div className="tbl-x">
     <table className="owners">
       <thead>
         <tr>
@@ -638,6 +650,7 @@ export function Ownership({ view, colors }: { view: ControlPanelView; colors: Ma
         </tr>
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -758,5 +771,33 @@ export function Activity({ items, colors, onFind }: { items: ActivityItem[] | nu
         )}
       </section>
     </>
+  );
+}
+
+/* ---------- Alerts ---------- */
+
+export function AlertsCard({ view, busy, onTest }: { view: ControlPanelView; busy: boolean; onTest: () => void }) {
+  const channel = view.alerts.channel;
+  return (
+    <section className="card">
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <div>
+          <b>{channel === null ? 'Alerts are off' : `Alerts are on, by ${channel === 'push' ? 'push notification' : 'email'}`}</b>
+          <div className="why">
+            {channel === null
+              ? 'Nothing tells you when a check fails, an agent halts itself or a price stops arriving. You would have to look.'
+              : 'You are told when a check fails, an agent halts itself or a price stops arriving, and sent a summary each Saturday. Silence means all is well.'}
+          </div>
+        </div>
+        <button className="btn v-sm" onClick={onTest} disabled={busy || channel === null}>
+          Send a test alert
+        </button>
+      </div>
+      {channel === null && (
+        <div className="explain">
+          <b>To turn them on:</b> install the free <b>ntfy</b> app on your phone and subscribe to a topic with a long, random name (at least 20 letters and digits; the name is the only thing keeping it private). Put the same name in Netlify as <span className="mono">ALERT_NTFY_TOPIC</span> and redeploy. Then press "Send a test alert".
+        </div>
+      )}
+    </section>
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { AgentView, KillPreview } from '../lib/api';
 import * as api from '../lib/api';
 import { formatGBP, formatQtyShort } from '../lib/format';
-import { capitalAdvice } from '../lib/guidance';
+import { capitalAdvice, limitsAdvice } from '../lib/guidance';
 import { Modal } from './Modal';
 
 interface Common {
@@ -512,12 +512,14 @@ export function GlobalHaltDialog({
    Add agent
    ------------------------------------------------------------------------- */
 
-export function AddAgentDialog({ onClose, onDone, onError }: Common) {
+export function AddAgentDialog({ onClose, onDone, onError, benchmark = 'VWRP' }: Common & { benchmark?: string }) {
+  const [kind, setKind] = useState<'hold' | 'sma'>('hold');
   const [name, setName] = useState('');
   const [id, setId] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const suggestion = name
+  const shownName = name.trim() || (kind === 'hold' ? `Hold ${benchmark}` : '');
+  const suggestion = shownName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
@@ -525,7 +527,7 @@ export function AddAgentDialog({ onClose, onDone, onError }: Common) {
   const create = async () => {
     setBusy(true);
     try {
-      onDone(await api.createAgent((id.trim() || suggestion).trim(), name.trim()));
+      onDone(await api.createAgent((id.trim() || suggestion).trim(), shownName, kind));
       onClose();
     } catch (error) {
       onError(error instanceof Error ? error.message : 'could not create agent');
@@ -543,19 +545,39 @@ export function AddAgentDialog({ onClose, onDone, onError }: Common) {
           <button onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button className="btn-primary" onClick={() => void create()} disabled={busy || !name.trim()}>
+          <button className="btn-primary" onClick={() => void create()} disabled={busy || !shownName}>
             Create
           </button>
         </>
       }
     >
+      <fieldset className="kind-choice">
+        <legend className="label">What it does</legend>
+        <label>
+          <input type="radio" name="kind" checked={kind === 'hold'} onChange={() => setKind('hold')} />
+          <span>
+            <b>Hold {benchmark}</b>
+            Buys the global index fund and keeps it. Makes no decisions. This is the result every
+            other agent has to beat, so it is the sensible place for most of the money.
+          </span>
+        </label>
+        <label>
+          <input type="radio" name="kind" checked={kind === 'sma'} onChange={() => setKind('sma')} />
+          <span>
+            <b>Moving-average rule</b>
+            Buys a share when its price is above its 20-day average and sells when it falls below.
+            A simple test rule, not expected to beat {benchmark} after costs. Useful for proving the
+            machinery with a small amount.
+          </span>
+        </label>
+      </fieldset>
       <label className="field">
         <span className="label">Name</span>
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Momentum"
+          placeholder={kind === 'hold' ? `Hold ${benchmark}` : 'Momentum'}
           autoComplete="off"
         />
       </label>
@@ -571,8 +593,89 @@ export function AddAgentDialog({ onClose, onDone, onError }: Common) {
         />
       </label>
       <p className="hint">
-        Creates the agent and its four ledger accounts. It starts <strong>idle</strong> with no
-        capital and an empty universe, so it can place nothing until you set both.
+        It starts <strong>idle</strong> with no capital, so it places nothing until you give it some
+        and start it.
+        {kind === 'sma' ? ' It also needs a list of shares it may trade.' : ''}
+      </p>
+    </Modal>
+  );
+}
+
+/* -------------------------------------------------------------------------
+   Limits
+
+   The two numbers that bound a mistake. The dialog says what each means in
+   pounds for this agent, because a percentage of an allocation is not a
+   quantity anyone has a feel for.
+   ------------------------------------------------------------------------- */
+
+export function LimitsDialog({ agent, onClose, onDone, onError }: Common & { agent: AgentView }) {
+  const [capOn, setCapOn] = useState(agent.dailyLossCapPct !== null);
+  const [cap, setCap] = useState(String(agent.dailyLossCapPct ?? 3));
+  const [order, setOrder] = useState(String(agent.maxOrderPct));
+  const [busy, setBusy] = useState(false);
+  const advice = limitsAdvice(agent, capOn ? cap.trim() : null, order.trim());
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      onDone(await api.setLimits(agent.id, capOn ? cap.trim() : null, order.trim()));
+      onClose();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'could not change the limits');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      kicker="Limits"
+      title={`Limits for ${agent.name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button className="btn-primary" onClick={() => void save()} disabled={busy || advice.level === 'stop'}>
+            Save limits
+          </button>
+        </>
+      }
+    >
+      <label className="limit-row">
+        <input type="checkbox" checked={capOn} onChange={(e) => setCapOn(e.target.checked)} />
+        <span>Stop trading for the day after a loss of</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={cap}
+          onChange={(e) => setCap(e.target.value)}
+          disabled={!capOn}
+          aria-label="Daily loss cap, percent"
+          style={{ width: 70 }}
+        />
+        <span>%</span>
+      </label>
+      <label className="limit-row">
+        <span>Largest single order:</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={order}
+          onChange={(e) => setOrder(e.target.value)}
+          aria-label="Largest single order, percent of allocation"
+          style={{ width: 70 }}
+        />
+        <span>% of its allocation</span>
+      </label>
+      <div className={`advice advice-${advice.level}`} role="status">
+        <b>{advice.title}</b>
+        {advice.detail}
+      </div>
+      <p className="hint">
+        Changes apply from its next run and are recorded in Activity. These limits live in this
+        app; before real money, the same limits must also be set at the broker.
       </p>
     </Modal>
   );

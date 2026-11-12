@@ -546,7 +546,7 @@ describe('one agent failing', () => {
     await readyAgent('aaa-1', { universe: ['AAPL'] });
     await readyAgent('zzz-1', { universe: ['MSFT'] });
     const broken = { name: 'broken', decide: (): never => { throw new Error('strategy blew up'); } };
-    const pick = (id: string) => (id === 'aaa-1' ? broken : new SmaCrossover({ window: 5, maxInvestedPct: 80 }));
+    const pick = (agent: { id: string }) => (agent.id === 'aaa-1' ? broken : new SmaCrossover({ window: 5, maxInvestedPct: 80 }));
 
     // aaa-1 runs first and throws. zzz-1 must still get its turn, and the run
     // must still end as a failure rather than a success with a log line.

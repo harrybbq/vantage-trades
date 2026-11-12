@@ -11,9 +11,13 @@ export const MIN_TRADING_DAYS = 60;
 export const MIN_CLEAN_NIGHTS = 20;
 
 export interface Readiness {
-  /** Days with a fund snapshot: days the ledger agreed with the broker. */
+  /**
+   * Days, since the first trade, on which the ledger agreed with the broker.
+   * Days before anything traded do not count: an empty ledger reconciles
+   * clean every night and proves nothing.
+   */
   tradingDays: number;
-  /** Consecutive weekdays, back from the latest, whose last check was clean. */
+  /** Consecutive weekdays since the first trade, back from the latest, whose last check was clean. */
   cleanStreak: number;
   /** A kill has sold shares on paper at least once. */
   killTested: boolean;
@@ -24,8 +28,18 @@ export interface Readiness {
 }
 
 export async function readiness(tx: Sql, now = new Date()): Promise<Readiness> {
+  // The record starts at the first trade. Counting from the first snapshot
+  // ticked "60 trading days" and "20 clean nights" for a fund that had never
+  // held anything — months of an empty ledger agreeing with an empty broker.
+  const first = await tx.query<{ day: string | null }>(
+    `select min((filled_at at time zone 'UTC')::date)::text as day from ledger.fills`,
+  );
+  const firstDay = first.rows[0]?.day ?? null;
+
   const days = await tx.query<{ n: string }>(
-    `select count(distinct as_of)::text as n from ledger.equity_snapshots where agent_id is null`,
+    `select count(distinct as_of)::text as n from ledger.equity_snapshots
+      where agent_id is null and as_of >= $1::date`,
+    [firstDay],
   );
 
   // The latest check of each day decides that day. A clean run followed by an
@@ -46,9 +60,11 @@ export async function readiness(tx: Sql, now = new Date()): Promise<Readiness> {
   let streak = 0;
   const d = new Date(now);
   if (!byDay.has(d.toISOString().slice(0, 10))) d.setUTCDate(d.getUTCDate() - 1);
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 200 && firstDay !== null; i++) {
+    const day = d.toISOString().slice(0, 10);
+    if (day < firstDay) break;
     if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) {
-      if (byDay.get(d.toISOString().slice(0, 10)) !== 'ok') break;
+      if (byDay.get(day) !== 'ok') break;
       streak += 1;
     }
     d.setUTCDate(d.getUTCDate() - 1);
@@ -62,10 +78,11 @@ export async function readiness(tx: Sql, now = new Date()): Promise<Readiness> {
      ) as tested`,
   );
 
+  // Agents that make decisions. A hold agent has no cap on purpose.
   const limits = await tx.query<{ active: string; limited: string }>(
     `select count(*)::text as active,
             count(*) filter (where daily_loss_cap_pct is not null)::text as limited
-       from ledger.agents where status <> 'killed'`,
+       from ledger.agents where status <> 'killed' and strategy <> 'hold'`,
   );
 
   return {
@@ -154,6 +171,7 @@ export async function activity(tx: Sql, limit = 100): Promise<ActivityItem[]> {
         : c.action === 'kill' && c.to_status === 'killing' ? 'Started killing'
         : c.action === 'kill' ? 'Stood down'
         : c.action === 'halt' ? 'Halted'
+        : c.action === 'set_limits' ? 'Changed its limits'
         : 'Started';
       const tags = [c.actor.startsWith('runner:') ? 'the agent itself' : c.actor];
       if (c.reason) tags.push(`“${c.reason}”`);

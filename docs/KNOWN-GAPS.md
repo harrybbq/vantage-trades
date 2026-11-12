@@ -31,9 +31,15 @@ transitions take a row lock (#14).
   lift. The daily loss cap is measured against the previous close's equity.
   (Migration 0005's comment says the cap is enforced in the database; it is
   not, it is a self-halt in the runner.)
-- **No UI to set an agent's limits.** The daily loss cap and largest-order
-  percentage can only be changed in SQL today, and the real-money checklist
-  requires a cap on every agent.
+- **Paper fills are fractional; most real London fills are not.** The
+  simulator will buy 2.76 shares of VWRP. A broker that only deals whole
+  shares on the LSE would buy 2, leaving more cash idle, and on a small
+  fund that difference is large. Decide the broker, then make the runner
+  round to what that broker can actually fill, before trusting paper results
+  as a forecast of live ones.
+- **Costs are a guess.** The simulator charges £1 an order plus a 0.07%
+  spread and slippage. On a £25 order that £1 is 4% each way. Replace these
+  with the chosen broker's real schedule before judging any small agent.
 
 ## Smaller
 
@@ -49,6 +55,10 @@ transitions take a row lock (#14).
 - **The local dev server allows any origin (#16).** Local only; never deployed.
 - **The `stats` action is no longer used by the panel (#19).** Harmless;
   remove with its tests in a tidy-up.
+- **Alerts are only as reliable as the scheduler.** The watchdog is a
+  separate function, but it runs on the same platform as the jobs it
+  watches. If Netlify's scheduler stops entirely, nothing is sent. The
+  weekly summary doubles as a heartbeat: a Saturday without one means look.
 
 ## Left out of the redesign on purpose
 

@@ -29,6 +29,7 @@ const FUNCTIONS = [
   'reconcile-scheduled',
   'agents-scheduled',
   'prices-scheduled',
+  'watch-scheduled',
 ];
 
 /**

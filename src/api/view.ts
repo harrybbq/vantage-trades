@@ -17,6 +17,8 @@ import { universesFor } from '../ledger/universe.js';
 import { formatQty, parseQty } from '../money.js';
 import { PaperBroker } from '../broker/paper.js';
 import { usingPaperBroker } from '../broker/config.js';
+import { alertChannel } from '../alerts/notify.js';
+import { benchmarkSymbol } from '../ledger/snapshots.js';
 
 export interface HoldingView {
   symbol: string;
@@ -48,6 +50,8 @@ export interface AgentView {
   startedAt: string | null;
   /** When it was created. The panel's colour for an agent follows this. */
   createdAt: string;
+  /** Which rule it runs: `sma`, or `hold` (buy the benchmark and keep it). */
+  strategy: string;
   /**
    * Today's gain or loss in pence, with money given or taken back since the
    * last close removed first. Without that, a £500 top-up read as a £500 day.
@@ -109,6 +113,9 @@ export interface ControlPanelView {
   reconciliation: ReconciliationView | null;
   agents: AgentView[];
   ownership: OwnershipView;
+  /** How the owner is told when something goes wrong. Null: they are not. */
+  alerts: { channel: 'push' | 'email' | null };
+  benchmarkSymbol: string;
   /**
    * Something the owner needs to read about the action that produced this
    * view — a kill that could not finish, say. Present only on the response
@@ -220,10 +227,10 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
   const closes = await priorClose(tx);
 
   const names = await tx.query<{
-    id: string; name: string; max_order_pct: string; daily_loss_cap_pct: string | null; started_at: Date | null; created_at: Date;
+    id: string; name: string; max_order_pct: string; daily_loss_cap_pct: string | null; started_at: Date | null; created_at: Date; strategy: string;
   }>(
     `select id, name, max_order_pct::text as max_order_pct,
-            daily_loss_cap_pct::text as daily_loss_cap_pct, started_at, created_at
+            daily_loss_cap_pct::text as daily_loss_cap_pct, started_at, created_at, strategy
        from ledger.agents`,
   );
   const nameById = new Map(names.rows.map((r) => [r.id, r.name]));
@@ -260,6 +267,7 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
         railsById.get(e.agentId)?.daily_loss_cap_pct == null ? null : Number(railsById.get(e.agentId)!.daily_loss_cap_pct),
       startedAt: railsById.get(e.agentId)?.started_at?.toISOString() ?? null,
       createdAt: railsById.get(e.agentId)?.created_at.toISOString() ?? '',
+      strategy: railsById.get(e.agentId)?.strategy ?? 'sma',
       todayMinor: e.equityMinor === null || close === undefined ? null : (e.equityMinor - close).toString(),
     };
   });
@@ -299,5 +307,7 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
       : null,
     agents,
     ownership: await ownership(tx),
+    alerts: { channel: alertChannel() },
+    benchmarkSymbol: benchmarkSymbol().toUpperCase(),
   };
 }

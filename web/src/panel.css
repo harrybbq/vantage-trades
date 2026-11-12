@@ -341,3 +341,9 @@
 .vt .theme-paper { color: var(--paper); }
 .vt .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .vt .mini-chip { font: 11.5px var(--mono); background: var(--overlay); border-radius: 5px; padding: 2px 6px; }
+
+/* A table wider than a phone scrolls inside its card, never the page. */
+.vt .tbl-x { overflow-x: auto; }
+@media (max-width: 720px) {
+  .vt table.owners th, .vt table.owners td { padding: 6px 4px; font-size: 12px; }
+}

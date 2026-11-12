@@ -287,3 +287,50 @@ export async function standDown(
   await transition(tx, agentId, 'killed', 'kill', actor, reason);
   return returned;
 }
+
+export interface AgentLimits {
+  /** The day's loss, as a percent of its opening value, at which it halts itself. Null: no cap. */
+  dailyLossCapPct: number | null;
+  /** Largest single order, as a percent of its allocation. */
+  maxOrderPct: number;
+}
+
+const twoDecimals = (n: number) => Math.round(n * 100) === n * 100 || Math.abs(Math.round(n * 100) - n * 100) < 1e-9;
+
+/**
+ * Change an agent's limits, and record that it happened.
+ *
+ * Loosening a limit is as much a control action as starting an agent, so it
+ * goes in the same log with what it was and what it became. The limits take
+ * effect at the agent's next tick; nothing in flight is touched.
+ */
+export async function setLimits(tx: Sql, agentId: string, limits: AgentLimits, actor: string): Promise<void> {
+  const status = await currentStatus(tx, agentId);
+  if (status === 'killed') throw new Error(`agent ${agentId} is killed; it has no limits to set`);
+
+  const { dailyLossCapPct: cap, maxOrderPct: order } = limits;
+  if (cap !== null && !(Number.isFinite(cap) && cap > 0 && cap <= 100 && twoDecimals(cap))) {
+    throw new Error('the daily loss cap must be above 0 and at most 100, with at most two decimal places');
+  }
+  if (!(Number.isFinite(order) && order > 0 && order <= 100 && twoDecimals(order))) {
+    throw new Error('the largest order must be above 0 and at most 100 percent of the allocation');
+  }
+
+  const before = await tx.query<{ cap: string | null; ord: string }>(
+    `select daily_loss_cap_pct::text as cap, max_order_pct::text as ord from ledger.agents where id = $1`,
+    [agentId],
+  );
+  const was = before.rows[0];
+
+  await tx.query(
+    `update ledger.agents set daily_loss_cap_pct = $2, max_order_pct = $3, updated_at = now() where id = $1`,
+    [agentId, cap === null ? null : cap.toFixed(2), order.toFixed(2)],
+  );
+
+  const show = (v: string | number | null | undefined) => (v === null || v === undefined ? 'none' : `${Number(v)}%`);
+  await tx.query(
+    `insert into ledger.agent_control_events (agent_id, action, from_status, to_status, actor, reason)
+     values ($1, 'set_limits', $2, $2, $3, $4)`,
+    [agentId, status, actor, `daily loss cap ${show(was?.cap)} → ${show(cap)}; largest order ${show(was?.ord)} → ${show(order)}`],
+  );
+}

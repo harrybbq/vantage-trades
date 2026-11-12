@@ -83,8 +83,9 @@ thing — they are not idempotent and each depends on the last.
 **On a database that already has the ledger**, `install.sql` will refuse (its
 first `create` fails and the whole thing rolls back, touching nothing). Apply
 only the migrations it does not have yet, in order. `0009` adds the price
-feed's currency table and `0010` the `killing` status and
-`ledger.orders.reject_reason`; the code expects both.
+feed's currency table, `0010` the `killing` status and
+`ledger.orders.reject_reason`, and `0011` each agent's `strategy`, a default
+daily loss cap and the `set_limits` control event; the code expects all three.
 
 Expect:
 
@@ -117,6 +118,8 @@ Set these in the Netlify UI. Never in a file, never in a commit.
 | `VITE_SUPABASE_ANON_KEY` | the same anon key again, for the sign-in screen |
 | `BENCHMARK_SYMBOL` | optional, defaults to `VWRP` |
 | `MARKET_DATA_API_KEY` | an Alpha Vantage key (free). Without it nothing is priced — see below |
+| `ALERT_NTFY_TOPIC` | optional. A long random topic name (20–64 letters, digits, `-`, `_`) for push alerts through ntfy.sh — see *Alerts* |
+| `RESEND_API_KEY`, `ALERT_EMAIL` | optional. Email alerts through Resend instead of push |
 
 **The two `VITE_` ones are deliberate and safe.** A Supabase project URL and
 its anon key are designed to be public — the anon key identifies the project
@@ -280,14 +283,32 @@ wrong.
 
 ### Scheduled jobs
 
-Two scheduled functions ship with the site. Netlify picks them up from their
+Four scheduled functions ship with the site. Netlify picks them up from their
 `config.schedule` export; nothing needs configuring for them to start.
 
 | Function | When | What it does |
 |---|---|---|
 | `reconcile-scheduled` | 22:37 UTC, weekdays | The mandatory daily reconciliation, then the equity snapshot |
-| `agents-scheduled` | hourly 14:00–20:00 UTC, weekdays | Ticks every running agent — **off unless `AGENTS_ENABLED=true`** |
-| `prices-scheduled` | 17:12 UTC, weekdays | Refreshes marks from the market data provider, once, after the close |
+| `agents-scheduled` | 09:11 and 13:11 UTC, weekdays | Ticks every running agent, inside London hours — **off unless `AGENTS_ENABLED=true`** |
+| `prices-scheduled` | 21:42 and 07:42 UTC, weekdays | Fetches the day's closing prices; the morning run only asks for what the evening missed |
+| `watch-scheduled` | 07:10 UTC, Tuesday–Saturday | Alerts if last night's check did not run; sends the weekly summary on Saturday |
+
+### Alerts
+
+The panel shows everything, but only to someone who opens it. With an alert
+channel set, the owner is told when the nightly check fails or does not run,
+when an agent halts itself or cannot run, and when prices stop arriving, and
+gets a summary each Saturday. With none set, all of that is only logged.
+
+Push is the simplest: install the ntfy app, subscribe to a topic with a long
+random name, and set `ALERT_NTFY_TOPIC` to the same name. There is no account;
+**the topic name is the only secret**, so anyone who learns it can read the
+alerts, and a short one is refused. Alerts pass through ntfy.sh in plain text
+and the weekly summary includes amounts. For email instead, set
+`RESEND_API_KEY` and `ALERT_EMAIL`.
+
+"Send a test alert" at the bottom of the panel confirms it works. An alert
+that cannot be sent never fails the job that raised it; it is logged.
 
 `agents-scheduled` is the only thing in the codebase that can place an order
 with no human present, so it ships switched off and stays that way until that

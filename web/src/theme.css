@@ -976,3 +976,13 @@ html[data-theme='light'] {
 .advice-ok { background: var(--gain-bg); }
 .advice-warn { background: var(--halt-bg); }
 .advice-stop { background: var(--loss-bg); }
+
+/* ---- Add-agent choice and limits fields ---- */
+.kind-choice { border: 0; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; }
+.kind-choice label { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--text-sm); line-height: 1.45; cursor: pointer; }
+.kind-choice label:has(input:checked) { border-color: var(--em); background: var(--gain-bg); }
+.kind-choice b { display: block; font-size: var(--text-base); }
+.kind-choice input { margin-top: 3px; width: auto; }
+.limit-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: var(--text-base); margin: 0 0 12px; }
+.limit-row input[type='checkbox'] { width: auto; flex: none; }
+.limit-row input[type='text'] { width: 72px; flex: none; text-align: right; }

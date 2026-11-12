@@ -363,5 +363,10 @@ single-JSON-state design, deliberately.
 - **Decided:** prices come from Alpha Vantage (free key, London listings,
   25 requests a day). Twelve Data's free plan does not cover the LSE. See
   `docs/DEPLOY.md`.
+- **Decided:** the owner starts with about £500 of paper capital and adds
+  more only as the record earns it. The default home for money is a `hold`
+  agent (buys the benchmark, keeps it); trading agents get small slices and
+  must beat it after costs. At this size, costs dominate any active agent:
+  say so wherever a small agent's results are shown or discussed.
 - What "start" does to an agent that was killed — fresh cost basis, or
   resumed history for its P/L-since-start figure.

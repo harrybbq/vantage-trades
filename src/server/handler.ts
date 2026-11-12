@@ -199,6 +199,10 @@ export async function handle(request: ApiRequest): Promise<ApiResponse> {
         return json(200, await actions.doRecordDeposit(body as never, actor));
       case 'recordWithdrawal':
         return json(200, await actions.doRecordWithdrawal(body as never, actor));
+      case 'setLimits':
+        return json(200, await actions.doSetLimits(body as never, actor));
+      case 'testAlert':
+        return json(200, await actions.doTestAlert());
       case 'createAgent':
         return json(200, await actions.doCreateAgent(body as never, actor));
       case 'allocate':

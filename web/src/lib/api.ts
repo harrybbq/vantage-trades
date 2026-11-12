@@ -33,6 +33,8 @@ export interface AgentView {
   dailyLossCapPct: number | null;
   startedAt: string | null;
   createdAt: string;
+  /** `sma`, or `hold` (buys the benchmark and keeps it). */
+  strategy: string;
   /** Today's gain or loss with money given or taken back removed. */
   todayMinor: string | null;
 }
@@ -64,6 +66,8 @@ export interface ControlPanelView {
   notice?: string;
   agents: AgentView[];
   ownership: OwnershipView;
+  alerts: { channel: 'push' | 'email' | null };
+  benchmarkSymbol: string;
 }
 
 export interface CurvePoint {
@@ -228,8 +232,13 @@ export const fetchActivity = () => post<{ items: ActivityItem[] }>({ action: 'ac
  */
 export const reconcileNow = () => post<ControlPanelView>({ action: 'reconcileNow' });
 
-export const createAgent = (id: string, name: string) =>
-  post<ControlPanelView>({ action: 'createAgent', id, name });
+export const createAgent = (id: string, name: string, strategy: 'sma' | 'hold' = 'sma') =>
+  post<ControlPanelView>({ action: 'createAgent', id, name, strategy });
+
+export const setLimits = (agentId: string, dailyLossCapPct: string | null, maxOrderPct: string) =>
+  post<ControlPanelView>({ action: 'setLimits', agentId, dailyLossCapPct, maxOrderPct });
+
+export const testAlert = () => post<ControlPanelView>({ action: 'testAlert' });
 
 export const recordDeposit = (amount: string, reference: string) =>
   post<ControlPanelView>({ action: 'recordDeposit', amount, reference });

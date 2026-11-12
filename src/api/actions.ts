@@ -14,7 +14,8 @@ import { inTransaction, getPool } from '../db.js';
 import { formatQty, parseMoney, type Minor } from '../money.js';
 import { createAgent } from '../ledger/agents.js';
 import { allocate, deallocate, recordDeposit, recordWithdrawal } from '../ledger/allocation.js';
-import { halt, start, globalHalt, previewKill, type KillPreview } from '../ledger/control.js';
+import { halt, start, globalHalt, previewKill, setLimits, type KillPreview } from '../ledger/control.js';
+import { notify, alertChannel } from '../alerts/notify.js';
 import { kill } from '../pipeline/kill.js';
 import { tradingBroker } from '../broker/select.js';
 import { addToUniverse, removeFromUniverse } from '../ledger/universe.js';
@@ -59,19 +60,66 @@ function checkAmount(raw: unknown): Minor {
 }
 
 export async function doCreateAgent(
-  input: { id: unknown; name: unknown },
+  input: { id: unknown; name: unknown; strategy?: unknown },
   actor: string,
 ): Promise<ControlPanelView> {
   const id = checkAgentId(input.id);
   const name = typeof input.name === 'string' ? input.name.trim() : '';
   if (!name) throw new ValidationError('name is required');
+  const strategy = input.strategy ?? 'sma';
+  if (strategy !== 'sma' && strategy !== 'hold') {
+    throw new ValidationError('strategy must be "sma" or "hold"');
+  }
 
   return inTransaction(async (tx) => {
-    await createAgent(tx, { id, name });
-    // Deliberately no universe and no capital: a new agent must be given both
-    // before it can place anything.
+    await createAgent(tx, { id, name, strategy });
+    // Deliberately no capital, and no universe beyond the benchmark a hold
+    // agent exists to buy: a new agent places nothing until it is given
+    // capital and started.
     return controlPanelView(tx);
   });
+}
+
+/** A percentage from the panel: a number, or a plain decimal string. */
+function checkPct(value: unknown, what: string): number {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,3}(\.\d{1,2})?$/.test(value.trim()) ? Number(value) : NaN;
+  if (!Number.isFinite(n)) throw new ValidationError(`${what} must be a number like 3 or 2.5`);
+  return n;
+}
+
+export async function doSetLimits(
+  input: { agentId: unknown; dailyLossCapPct: unknown; maxOrderPct: unknown },
+  actor: string,
+): Promise<ControlPanelView> {
+  const agentId = checkAgentId(input.agentId);
+  const cap = input.dailyLossCapPct === null ? null : checkPct(input.dailyLossCapPct, 'the daily loss cap');
+  const order = checkPct(input.maxOrderPct, 'the largest order');
+
+  return inTransaction(async (tx) => {
+    try {
+      await setLimits(tx, agentId, { dailyLossCapPct: cap, maxOrderPct: order }, actor);
+    } catch (error) {
+      throw new ValidationError(error instanceof Error ? error.message : String(error));
+    }
+    return controlPanelView(tx);
+  });
+}
+
+/** Send a test alert, so the owner finds out it works before they need it. */
+export async function doTestAlert(): Promise<ControlPanelView> {
+  const channel = alertChannel();
+  const result = await notify({
+    title: 'Vantage Trades: test alert',
+    body: 'This is a test. If you can read it, alerts are working.',
+  });
+  const view = await inTransaction((tx) => controlPanelView(tx));
+  const notice =
+    result === 'sent'
+      ? `Test alert sent by ${channel === 'push' ? 'push notification' : 'email'}. If it has not arrived in a minute, check the setup.`
+      : result === 'unconfigured'
+        ? 'Alerts are not set up yet, so nothing was sent.'
+        : 'The alert could not be sent. The setup looks wrong; the function log says why.';
+  return { ...view, notice };
 }
 
 /**

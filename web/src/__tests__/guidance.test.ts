@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capitalAdvice, integrityOf, leadSummary, nextStep, parsePence, verdictFor } from '../lib/guidance';
+import { capitalAdvice, integrityOf, leadSummary, limitsAdvice, nextStep, parsePence, verdictFor } from '../lib/guidance';
 import type { PerformancePoint } from '../lib/api';
 import { agent, view } from './fixtures';
 
@@ -98,5 +98,53 @@ describe('the first run', () => {
   it('then an agent', () => {
     const v = view({ unallocatedMinor: '500000', allocatedMinor: '0', agents: [], reconciliation: null });
     expect(nextStep(v, integrityOf(v)).title).toBe('Add your first agent');
+  });
+});
+
+describe('a hold agent', () => {
+  const hold = agent({ id: 'hold-1', name: 'Hold VWRP', strategy: 'hold', dailyLossCapPct: null, maxOrderPct: 100, universe: ['VWRP'] });
+
+  it('is never judged: it is the benchmark', () => {
+    expect(verdictFor(hold, points(70, () => -0.2)).title).toMatch(/Nothing to judge/);
+  });
+
+  it('gets no size warning, because holding the index is the default', () => {
+    expect(capitalAdvice(hold, view(), '1500', true).level).toBe('ok');
+    expect(capitalAdvice(hold, view(), '1501', true).level).toBe('stop');
+  });
+
+  it('is not nagged about having no loss cap', () => {
+    expect(limitsAdvice(hold, null, '100').level).toBe('ok');
+  });
+});
+
+describe('limits advice', () => {
+  it('says what a cap means in pounds for this agent', () => {
+    // £2,000 allocated, 2.5% cap.
+    expect(limitsAdvice(agent(), '2.5', '25').title).toMatch(/£50\.00/);
+    expect(limitsAdvice(agent(), '2.5', '25').detail).toMatch(/£500\.00/);
+  });
+
+  it('warns when a trading agent has no cap, or a very loose one', () => {
+    expect(limitsAdvice(agent(), null, '25').level).toBe('warn');
+    expect(limitsAdvice(agent(), '15', '25').level).toBe('warn');
+  });
+
+  it('refuses values that are not percentages', () => {
+    expect(limitsAdvice(agent(), '0', '25').level).toBe('stop');
+    expect(limitsAdvice(agent(), '3', '101').level).toBe('stop');
+    expect(limitsAdvice(agent(), 'lots', '25').level).toBe('stop');
+  });
+});
+
+describe('alerts', () => {
+  it('become the next step once something is running and nothing would tell the owner', () => {
+    const v = view({ alerts: { channel: null } });
+    expect(nextStep(v, integrityOf(v)).title).toMatch(/Set up alerts/);
+  });
+
+  it('are not pushed before anything is running', () => {
+    const v = view({ alerts: { channel: null }, agents: [agent({ status: 'idle' })] });
+    expect(nextStep(v, integrityOf(v)).title).toMatch(/Start Momentum/);
   });
 });

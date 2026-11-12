@@ -12,6 +12,7 @@
 
 import { refreshPrices } from '../../src/market/feed.js';
 import { closePool } from '../../src/db.js';
+import { notify } from '../../src/alerts/notify.js';
 
 export default async function pricesScheduled(): Promise<Response> {
   try {
@@ -32,6 +33,18 @@ export default async function pricesScheduled(): Promise<Response> {
     // a feed that has quietly stopped working shows as a failed run rather
     // than a successful one that logged a warning nobody reads.
     const broken = result.symbols.length > result.skipped.length && result.priced === 0;
+
+    // Told once a day, in the evening: by then a price that is merely late
+    // has had its chance, and the morning run would only repeat the news.
+    if (result.rejected.length > 0 && new Date().getUTCHours() >= 12) {
+      await notify({
+        title: 'Vantage Trades: some prices did not arrive',
+        body:
+          result.rejected.map((r) => `${r.symbol}: ${r.reason}`).join('\n') +
+          '\n\nThe last known price is kept, so nothing is wrong yet, but a holding with an old price is valued at an old price.',
+        urgent: broken,
+      });
+    }
     return new Response(summary, { status: broken ? 500 : 200 });
   } catch (error) {
     console.error('the price refresh failed:', error);
@@ -42,13 +55,15 @@ export default async function pricesScheduled(): Promise<Response> {
 }
 
 /**
- * Once a day, after the London close.
+ * Twice a day: late evening, and early the next morning.
  *
- * The free feed allows 25 requests a day and serves end-of-day prices, so an
- * hourly run would exhaust the allowance by lunchtime and learn nothing new.
- * 17:12 UTC is after the close in summer and winter time, and well before the
- * nightly reconciliation at 22:37. "Check now" on the panel asks only about
- * symbols not yet priced since the last close, so it costs nothing on a day
- * this has already run.
+ * The free feed serves end-of-day prices and allows 25 requests a day. It was
+ * asked once at 17:12, just after the close, and the one time this was looked
+ * at (11 Nov 2026) the stored price was still the previous day's: the close
+ * seems to be published later than that. So 21:42 UTC asks for today's
+ * close, in time for the 22:37 check, and 07:42
+ * picks up anything that was still late, before the agents decide at 09:11.
+ * A symbol already priced since the last close is not asked about again, so
+ * the second run costs nothing when the first one worked.
  */
-export const config = { schedule: '12 17 * * 1-5' };
+export const config = { schedule: '42 7,21 * * 1-5' };

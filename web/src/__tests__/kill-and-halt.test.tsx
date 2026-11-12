@@ -73,7 +73,7 @@ describe('the Kill dialog', () => {
 });
 
 describe('Halt on an agent card', () => {
-  const actions = { onCapital: vi.fn(), onUniverse: vi.fn(), onHalt: vi.fn(), onStart: vi.fn(), onKill: vi.fn() };
+  const actions = { onLimits: vi.fn(), onCapital: vi.fn(), onUniverse: vi.fn(), onHalt: vi.fn(), onStart: vi.fn(), onKill: vi.fn() };
 
   it('stays usable while something else is in flight', async () => {
     render(<AgentPanel agent={agent()} color="var(--a1)" series={undefined} busy={true} first={false} {...actions} />);

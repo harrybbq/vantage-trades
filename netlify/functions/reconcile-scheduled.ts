@@ -18,11 +18,32 @@
 
 import { runDailyReconcile } from '../../src/jobs/daily-reconcile.js';
 import { tradingBroker } from '../../src/broker/select.js';
-import { closePool } from '../../src/db.js';
+import { closePool, inTransaction } from '../../src/db.js';
+import { notify } from '../../src/alerts/notify.js';
+
+/** What the newest check said, for the alert. */
+async function latestSummary(): Promise<string> {
+  return inTransaction(async (tx) => {
+    const r = await tx.query<{ summary: string | null }>(
+      `select detail->>'summary' as summary from ledger.reconciliations order by run_at desc limit 1`,
+    );
+    return r.rows[0]?.summary ?? 'No detail was recorded.';
+  }).catch(() => 'The detail could not be read.');
+}
 
 export default async function reconcileScheduled(): Promise<Response> {
   try {
     const clean = await runDailyReconcile(tradingBroker());
+
+    if (!clean) {
+      await notify({
+        title: 'Vantage Trades: the nightly check found a problem',
+        body:
+          `${await latestSummary()}\n\nEvery figure on the panel is suspect until this is explained. ` +
+          'Consider Halt all while you look.',
+        urgent: true,
+      });
+    }
 
     // Non-2xx on divergence, so the platform records a failed run rather than
     // a successful one that happened to log a disaster. A scheduled job whose
@@ -32,6 +53,13 @@ export default async function reconcileScheduled(): Promise<Response> {
     });
   } catch (error) {
     console.error('reconciliation failed to run:', error);
+    await notify({
+      title: 'Vantage Trades: the nightly check could not run',
+      body:
+        `${error instanceof Error ? error.message : String(error)}\n\nNothing confirmed the numbers tonight. ` +
+        'Open the panel and press Check now; /api/health says what is wrong if that fails too.',
+      urgent: true,
+    });
     return new Response('reconciliation failed to run', { status: 500 });
   } finally {
     // Each invocation gets its own process and its own single connection.

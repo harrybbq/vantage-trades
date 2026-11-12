@@ -202,6 +202,13 @@ describe('the read models, against the ledger', () => {
          values ($1, $1, 0, 0, 0, ${status === 'ok' ? '0' : 'null'}, 0, ${status === 'ok' ? '0' : 'null'}, $2)`,
         [iso, status],
       );
+    // The record starts at the first trade, here the Friday before.
+    await inTransaction(async (tx) => {
+      await fundedAgent(tx, 'momentum-1', '1000.00');
+      await trade(tx, 'momentum-1', 'buy', 'AAPL', '1', '100.00');
+    });
+    await getPool().query(`update ledger.fills set filled_at = '2026-09-25T10:00:00Z'`);
+
     // Mon–Thu clean, Fri clean then an error that same evening: Friday counts
     // as an error night, and the streak stops before it.
     for (const d of ['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01']) await night(`${d}T22:37:00Z`, 'ok');

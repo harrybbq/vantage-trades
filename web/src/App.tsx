@@ -7,11 +7,12 @@ import {
   FundsDialog,
   GlobalHaltDialog,
   KillDialog,
+  LimitsDialog,
   UniverseDialog,
 } from './components/dialogs';
 import { SignIn } from './components/SignIn';
 import { Performance } from './components/panel/Performance';
-import { Activity, AgentPanel, agentColors, Banner, Coach, FundSummary, Glance, Ownership, PROBLEM_ORDER, ReadinessCard } from './components/panel/Sections';
+import { Activity, AgentPanel, agentColors, AlertsCard, Banner, Coach, FundSummary, Glance, Ownership, PROBLEM_ORDER, ReadinessCard } from './components/panel/Sections';
 import { integrityOf, leadSummary, nextStep } from './lib/guidance';
 import { authConfigured, currentSession, onAuthChange, signOut } from './lib/auth';
 import './panel.css';
@@ -19,6 +20,7 @@ import './panel.css';
 type Dialog =
   | { kind: 'capital'; agent: AgentView }
   | { kind: 'universe'; agent: AgentView }
+  | { kind: 'limits'; agent: AgentView }
   | { kind: 'kill'; agent: AgentView }
   | { kind: 'globalHalt' }
   | { kind: 'addAgent' }
@@ -207,7 +209,8 @@ function ControlPanel() {
   const chosenSeries = selected === 'fund' ? perf?.performance.fund : seriesById.get(selected);
   const chosenColor = selected === 'fund' ? 'var(--text)' : (colors.get(selected) ?? 'var(--a1)');
   const chosenEvents = (items ?? []).filter((i) => i.kind !== 'check' && (selected === 'fund' ? i.kind === 'money' && i.agentId === null : i.agentId === selected));
-  const leads = live.map((a) => leadSummary(seriesById.get(a.id)?.points ?? []));
+  // A hold agent is the benchmark; it has no lead to judge.
+  const leads = live.filter((a) => a.strategy !== 'hold').map((a) => leadSummary(seriesById.get(a.id)?.points ?? []));
 
   const findOnChart = (item: ActivityItem) => {
     if (!item.agentId) return;
@@ -340,6 +343,7 @@ function ControlPanel() {
               first={i === 0}
               onCapital={() => setDialog({ kind: 'capital', agent })}
               onUniverse={() => setDialog({ kind: 'universe', agent })}
+              onLimits={() => setDialog({ kind: 'limits', agent })}
               onHalt={() => void run(() => api.halt(agent.id, 'halted from the control panel'))}
               onStart={() => void run(() => api.start(agent.id))}
               onKill={() => setDialog({ kind: 'kill', agent })}
@@ -381,11 +385,20 @@ function ControlPanel() {
         </div>
         {perf ? <ReadinessCard readiness={perf.readiness} leads={leads} /> : <div className="loading">Loading…</div>}
 
+        <div className="section-h">
+          <h2>Alerts</h2>
+          <span className="sub">So that not looking is safe</span>
+        </div>
+        <AlertsCard view={view} busy={busy} onTest={() => void run(() => api.testAlert())} />
+
         <Activity items={items} colors={colors} onFind={findOnChart} />
       </main>
 
       {dialog?.kind === 'capital' && (
         <CapitalDialog agent={dialog.agent} poolMinor={view.unallocatedMinor} view={view} onClose={() => setDialog(null)} onDone={applyView} onError={setError} />
+      )}
+      {dialog?.kind === 'limits' && (
+        <LimitsDialog agent={dialog.agent} onClose={() => setDialog(null)} onDone={applyView} onError={setError} />
       )}
       {dialog?.kind === 'universe' && (
         <UniverseDialog
@@ -408,7 +421,7 @@ function ControlPanel() {
         />
       )}
       {dialog?.kind === 'globalHalt' && <GlobalHaltDialog running={running} onClose={() => setDialog(null)} onDone={applyView} onError={setError} />}
-      {dialog?.kind === 'addAgent' && <AddAgentDialog onClose={() => setDialog(null)} onDone={applyView} onError={setError} />}
+      {dialog?.kind === 'addAgent' && <AddAgentDialog benchmark={view.benchmarkSymbol} onClose={() => setDialog(null)} onDone={applyView} onError={setError} />}
       {dialog?.kind === 'funds' && <FundsDialog poolMinor={view.unallocatedMinor} onClose={() => setDialog(null)} onDone={applyView} onError={setError} />}
     </div>
   );

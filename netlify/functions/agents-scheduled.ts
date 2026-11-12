@@ -27,7 +27,8 @@
  * that gets tightened without anyone deciding to trade more.
  */
 
-import { runAllAgents } from '../../src/jobs/run-agents.js';
+import { runAllAgents, strategyFor, type AgentEvent } from '../../src/jobs/run-agents.js';
+import { notify } from '../../src/alerts/notify.js';
 import { tradingBroker } from '../../src/broker/select.js';
 import { closePool } from '../../src/db.js';
 
@@ -38,11 +39,33 @@ export default async function agentsScheduled(): Promise<Response> {
     return new Response('agents are not enabled (set AGENTS_ENABLED=true)', { status: 200 });
   }
 
+  const events: AgentEvent[] = [];
+  // Whatever happens to the run, the owner hears about anything that stopped.
+  const tell = async () => {
+    if (events.length === 0) return;
+    await notify({
+      title: events.some((e) => e.kind === 'halted-itself')
+        ? 'Vantage Trades: an agent halted itself'
+        : 'Vantage Trades: an agent could not run',
+      body:
+        events
+          .map((e) => `${e.agentId} ${e.kind === 'halted-itself' ? 'halted itself' : 'failed'}: ${e.detail}`)
+          .join('\n') +
+        '\n\nA halted agent opens nothing and closes nothing until you press Resume. What it holds still moves with the market.',
+      urgent: true,
+    });
+  };
+
   try {
-    const acted = await runAllAgents(tradingBroker());
+    const acted = await runAllAgents(tradingBroker(), strategyFor, (event) => events.push(event));
+    await tell();
     return new Response(`ticked, ${acted} agent(s) acted`, { status: 200 });
   } catch (error) {
     console.error('the agent run failed:', error);
+    if (events.length === 0) {
+      events.push({ agentId: 'the run', kind: 'failed', detail: error instanceof Error ? error.message : String(error) });
+    }
+    await tell();
     return new Response('the agent run failed', { status: 500 });
   } finally {
     await closePool().catch(() => undefined);
@@ -50,11 +73,15 @@ export default async function agentsScheduled(): Promise<Response> {
 }
 
 /**
- * Hourly through the US session, weekdays.
+ * Twice a day inside London hours, weekdays.
  *
- * 14:00–20:00 UTC covers 09:30–16:00 New York across both daylight and
- * standard time. Hourly is a ceiling, not a cadence: each agent's own
- * `min_tick_seconds` decides how often it actually acts, so raising this
- * frequency does not make any agent trade more.
+ * The ledger is sterling and the shares are London-listed, so orders belong
+ * inside the London session (08:00–16:30). The prices are end-of-day: there
+ * is one new bar a day, and a decision is keyed to its bar, so a second tick
+ * on the same bar places nothing. 09:11 is the decision; 13:11 is a second
+ * chance if the first run failed. Both are after the 07:42 price run.
+ *
+ * This used to run hourly through the US session, which for London shares
+ * meant placing orders after the market had closed.
  */
-export const config = { schedule: '11 14-20 * * 1-5' };
+export const config = { schedule: '11 9,13 * * 1-5' };
