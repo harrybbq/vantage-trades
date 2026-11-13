@@ -26,6 +26,25 @@ export function benchmarkSymbol(): string {
   return process.env['BENCHMARK_SYMBOL'] ?? DEFAULT_BENCHMARK;
 }
 
+/**
+ * What the benchmark is called when a person is reading.
+ *
+ * "VWRP" is a stock-market code, and the owner is new to this. The panel and
+ * the alerts use this name; the code is kept for the places the actual share
+ * is listed.
+ */
+export const DEFAULT_BENCHMARK_NAME = 'World index fund';
+
+export function benchmarkName(): string {
+  return process.env['BENCHMARK_NAME']?.trim() || DEFAULT_BENCHMARK_NAME;
+}
+
+/** The name inside a sentence: "the world index fund". */
+export function benchmarkPhrase(): string {
+  const name = benchmarkName();
+  return `the ${name.charAt(0).toLowerCase()}${name.slice(1)}`;
+}
+
 export interface SnapshotResult {
   asOf: string;
   fundEquityMinor: Minor | null;

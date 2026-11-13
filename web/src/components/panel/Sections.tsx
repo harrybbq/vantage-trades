@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { ActivityItem, AgentView, ControlPanelView, PerformanceSeries, Readiness } from '../../lib/api';
 import { dirOf, formatDay, formatGBP, formatPctArrow, formatPp, formatQtyShort, formatSigned, signOf } from '../../lib/format';
+import { bench, benchLabel, benchShort, benchSymbol } from '../../lib/benchmark';
 import {
   isHold,
   JUDGE_AFTER_DAYS,
@@ -127,7 +128,7 @@ export function Coach({ view, readiness, next }: { view: ControlPanelView; readi
     ['Put money in the pot', funded ? `${formatGBP((BigInt(view.unallocatedMinor) + BigInt(view.allocatedMinor)).toString())} recorded` : 'Record a bank transfer'],
     ['Set up agents', setUp ? `${live.length} agent${live.length === 1 ? '' : 's'}` : 'Each needs capital and a list of shares'],
     ['Paper-trade and watch', `Trading day ${days} of at least ${target}`],
-    ['Judge each agent against VWRP', `Unlocks at ${target} trading days`],
+    [`Judge each agent against ${bench()}`, `Unlocks at ${target} trading days`],
     ['Decide about real money', 'Only if the checklist below is all ticks'],
   ];
   return (
@@ -278,7 +279,7 @@ export function Glance({ agents, series, colors }: { agents: AgentView[]; series
         <span>Verdict</span>
         <span className="g-r">Equity</span>
         <span className="g-r">Today</span>
-        <span className="g-r">vs VWRP</span>
+        <span className="g-r">vs {benchShort().toLowerCase()}</span>
         <span>Record · shared scale</span>
         <span>Today's loss vs cap</span>
       </div>
@@ -534,6 +535,7 @@ export function AgentPanel({ agent, color, series, busy, first, ...act }: { agen
                 <tr key={h.symbol}>
                   <td className="sym">
                     {h.symbol}
+                    {h.symbol === benchSymbol() && <small className="plain">{benchLabel().toLowerCase()}</small>}
                     {h.marketValueMinor === null && <small className="old">◐ no price</small>}
                   </td>
                   <td>{formatQtyShort(h.qty)}</td>
@@ -619,7 +621,10 @@ export function Ownership({ view, colors }: { view: ControlPanelView; colors: Ma
           const match = s.brokerQty === null ? null : s.brokerQty === s.ledgerQty;
           return (
             <tr key={s.symbol}>
-              <td>{s.symbol}</td>
+              <td>
+                {s.symbol}
+                {s.symbol === benchSymbol() && <span className="why"> · {benchLabel().toLowerCase()}</span>}
+              </td>
               <td>
                 <span className="own-split">
                   {s.owners.map((w, i) => (
@@ -673,7 +678,7 @@ export function ReadinessCard({ readiness, leads }: { readiness: Readiness; lead
         ))}
       </ul>
       <div className="explain">
-        Even with every tick, a few months ahead of VWRP is weak evidence: proving real skill usually takes years of record. Most strategies that win on paper don't win with real money, because real trades pay the spread and get worse prices. If you go live, start with an amount you would be fine losing entirely.
+        Even with every tick, a few months ahead of {bench()} is weak evidence: proving real skill usually takes years of record. Most strategies that win on paper don't win with real money, because real trades pay the spread and get worse prices. If you go live, start with an amount you would be fine losing entirely.
       </div>
       <div style={{ marginTop: 14 }}>
         <button className="btn v-sm" disabled title="There is no live broker connected, and the checklist is not complete.">

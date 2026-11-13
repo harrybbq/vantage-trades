@@ -12,10 +12,11 @@ import { formatGBP } from '../money.js';
 import { controlPanelView } from '../api/view.js';
 import { performanceView, type PerformancePoint } from '../api/performance.js';
 import { readiness, MIN_TRADING_DAYS } from '../api/insights.js';
+import { benchmarkPhrase } from '../ledger/snapshots.js';
 import type { Alert } from './notify.js';
 
 const signed = (minor: bigint) => `${minor > 0n ? '+' : minor < 0n ? '-' : ''}${formatGBP(minor < 0n ? -minor : minor)}`;
-const pp = (n: number) => `${Math.abs(n).toFixed(1)} pp ${n >= 0 ? 'ahead of' : 'behind'} VWRP`;
+const pp = (n: number) => `${Math.abs(n).toFixed(1)} pp ${n >= 0 ? 'ahead of' : 'behind'} ${benchmarkPhrase()}`;
 
 function weekChange(points: readonly PerformancePoint[], since: string): bigint | null {
   const recent = points.filter((p) => p.date > since && p.dayPnlMinor !== null);
@@ -45,7 +46,7 @@ export async function weeklyDigest(tx: Sql, now = new Date()): Promise<Alert | n
           (fundWeek === null ? '.' : ` (${signed(fundWeek)} this week, money in or out left aside).`),
   );
   if (lastFund?.shadowMinor) {
-    lines.push(`The same money in VWRP would be about ${formatGBP(BigInt(lastFund.shadowMinor))}.`);
+    lines.push(`The same money in ${benchmarkPhrase()} would be about ${formatGBP(BigInt(lastFund.shadowMinor))}.`);
   }
   lines.push('');
 
@@ -57,7 +58,7 @@ export async function weeklyDigest(tx: Sql, now = new Date()): Promise<Alert | n
     let line = `- ${agent.name} (${agent.status}): ${value}`;
     if (week !== null) line += `, ${signed(week)} this week`;
     if (agent.strategy === 'hold') {
-      line += '. It holds VWRP: it is the benchmark.';
+      line += `. It holds ${benchmarkPhrase()}: it is the benchmark.`;
     } else if (last && last.benchPct !== null && points.length >= 2) {
       line += `, ${pp(last.twrPct - last.benchPct)} since it started.`;
       line += points.length < MIN_TRADING_DAYS ? ` Day ${points.length} of ${MIN_TRADING_DAYS}: too early to judge.` : '';

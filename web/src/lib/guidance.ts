@@ -10,6 +10,7 @@
  */
 
 import type { AgentView, ControlPanelView, PerformancePoint, Readiness } from './api';
+import { bench, benchLabel } from './benchmark';
 
 export const JUDGE_AFTER_DAYS = 60;
 export const MIN_CHART_DAYS = 8;
@@ -19,7 +20,7 @@ export const SOFT_SHARE_PCT = 25;
 /* ---------- Luck band ---------- */
 
 /**
- * How far the lead over VWRP can wander by luck alone, after `n` days.
+ * How far the lead over the benchmark can wander by luck alone, after `n` days.
  *
  * The daily change in the lead has some spread; with no skill at all, its sum
  * after n days spreads with the square root of n. The floor stops a quiet
@@ -97,8 +98,8 @@ export function verdictFor(agent: AgentView, points: readonly PerformancePoint[]
       tone: 'ready',
       title: 'Nothing to judge: this is the benchmark',
       body: invested
-        ? 'It holds VWRP and makes no decisions. It will track VWRP, a little behind because buying cost something. Leave it alone; every other agent is measured against it.'
-        : 'It buys VWRP at the next morning run and then holds it. It makes no other decisions.',
+        ? `It holds ${bench()} and makes no decisions. Its line sits a touch behind the comparison only because buying cost something. Leave it alone; every other agent is measured against it.`
+        : `It buys ${bench()} at the next morning run and then holds it. It makes no other decisions.`,
     };
   }
   if (agent.status === 'idle') {
@@ -112,16 +113,16 @@ export function verdictFor(agent: AgentView, points: readonly PerformancePoint[]
       tone: 'ready',
       title: 'Ready to start',
       body: isHold(agent)
-        ? 'It has capital. Once started it buys VWRP at the next morning run and holds it. Nothing real is at risk.'
+        ? `It has capital. Once started it buys ${bench()} at the next morning run and holds it. Nothing real is at risk.`
         : `It has capital and ${agent.universe.length} share${agent.universe.length === 1 ? '' : 's'} it may trade. Starting begins its paper record. Nothing real is at risk.`,
     };
   }
 
   const lead = leadSummary(points);
   if (!lead) {
-    return { tone: 'wait', title: 'Too early to judge: leave it running', body: 'It has no record yet to compare with VWRP. The first point appears after the nightly check.' };
+    return { tone: 'wait', title: 'Too early to judge: leave it running', body: `It has no record yet to compare with ${bench()}. The first point appears after the nightly check.` };
   }
-  const gap = `${Math.abs(lead.leadPp).toFixed(1)} pp ${lead.leadPp >= 0 ? 'ahead of' : 'behind'} VWRP`;
+  const gap = `${Math.abs(lead.leadPp).toFixed(1)} pp ${lead.leadPp >= 0 ? 'ahead of' : 'behind'} ${bench()}`;
   if (lead.days < JUDGE_AFTER_DAYS) {
     return {
       tone: 'wait',
@@ -133,7 +134,7 @@ export function verdictFor(agent: AgentView, points: readonly PerformancePoint[]
     return {
       tone: 'wait',
       title: 'No sign of skill yet',
-      body: `After ${lead.days} trading days it is ${gap}, inside the ±${lead.bandPp.toFixed(1)} pp luck alone produces. Holding VWRP would have done about as well, for less risk and no effort.`,
+      body: `After ${lead.days} trading days it is ${gap}, inside the ±${lead.bandPp.toFixed(1)} pp luck alone produces. Simply holding ${bench()} would have done about as well, for less risk and no effort.`,
     };
   }
   return lead.leadPp > 0
@@ -145,7 +146,7 @@ export function verdictFor(agent: AgentView, points: readonly PerformancePoint[]
     : {
         tone: 'bad',
         title: 'Behind by more than luck usually explains',
-        body: `After ${lead.days} trading days it is ${gap}, outside the ±${lead.bandPp.toFixed(1)} pp band. Worth considering whether to stop it; VWRP would have done better with the same money.`,
+        body: `After ${lead.days} trading days it is ${gap}, outside the ±${lead.bandPp.toFixed(1)} pp band. Worth considering whether to stop it; ${bench()} would have done better with the same money.`,
       };
 }
 
@@ -213,7 +214,7 @@ export function nextStep(view: ControlPanelView, integrity: IntegrityState): Nex
   if (live.length === 0) {
     return {
       title: 'Add your first agent',
-      why: 'Start with a "Hold VWRP" agent. It simply buys the global index fund and keeps it, which is the result every other agent has to beat. It starts idle and places nothing until you give it capital and start it.',
+      why: `Start with the "${benchLabel()}" kind. It simply buys one fund holding thousands of companies worldwide and keeps it, which is the result every other agent has to beat. It starts idle and places nothing until you give it capital and start it.`,
     };
   }
   const killing = live.find((a) => a.status === 'killing');
@@ -270,7 +271,7 @@ export function capitalAdvice(agent: AgentView, view: ControlPanelView, addText:
   if (giving && isHold(agent)) {
     return add > BigInt(view.unallocatedMinor)
       ? { level: 'stop', title: `The pool only has £${(BigInt(view.unallocatedMinor) / 100n).toLocaleString('en-GB')}.`, detail: 'To give more, record a bank transfer in first, or take capital back from another agent.' }
-      : { level: 'ok', title: 'This agent just buys VWRP and holds it.', detail: 'It is the benchmark, so there is no size limit to suggest. It buys at the next morning run.' };
+      : { level: 'ok', title: `This agent just buys ${bench()} and holds it.`, detail: 'It is the benchmark, so there is no size limit to suggest. It buys at the next morning run.' };
   }
 
   const pool = BigInt(view.unallocatedMinor);
@@ -355,8 +356,8 @@ export function readinessChecks(r: Readiness, leads: (LeadSummary | null)[]): Ch
   return [
     { ok: r.tradingDays >= r.minTradingDays, label: `At least ${r.minTradingDays} trading days of paper record`, hint: 'About three months. The minimum before judging, not proof of skill.', progress: `${Math.min(r.tradingDays, r.minTradingDays)} / ${r.minTradingDays}` },
     { ok: r.cleanStreak >= r.minCleanNights, label: `The ledger matched the broker every night for ${r.minCleanNights} nights in a row`, hint: 'Proves the money tracking is right before trusting any number.', progress: `${Math.min(r.cleanStreak, r.minCleanNights)} / ${r.minCleanNights}` },
-    { ok: outside > 0, label: 'An agent’s lead over VWRP has left the luck band, after all costs', hint: outside > 0 ? 'At least one has. Encouraging, not proof.' : 'None has yet.', progress: `${outside} / ${leads.length}` },
+    { ok: outside > 0, label: `An agent’s lead over ${bench()} has left the luck band, after all costs`, hint: outside > 0 ? 'At least one has. Encouraging, not proof.' : 'None has yet.', progress: `${outside} / ${leads.length}` },
     { ok: r.killTested, label: 'Kill tried on paper, with an agent holding shares', hint: 'So the first real Kill is not the first Kill.', progress: r.killTested ? 'done' : 'not yet' },
-    { ok: r.agentsActive > 0 && r.agentsWithLimits === r.agentsActive, label: 'A daily loss cap set on every agent that trades', hint: 'So a bad day ends with the agent stopping itself. A Hold VWRP agent needs none.', progress: `${r.agentsWithLimits} / ${r.agentsActive}` },
+    { ok: r.agentsActive > 0 && r.agentsWithLimits === r.agentsActive, label: 'A daily loss cap set on every agent that trades', hint: 'So a bad day ends with the agent stopping itself. An agent that only holds the index fund needs none.', progress: `${r.agentsWithLimits} / ${r.agentsActive}` },
   ];
 }

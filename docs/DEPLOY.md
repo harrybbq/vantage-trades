@@ -118,6 +118,7 @@ Set these in the Netlify UI. Never in a file, never in a commit.
 | `VITE_SUPABASE_ANON_KEY` | the same anon key again, for the sign-in screen |
 | `BENCHMARK_SYMBOL` | optional, defaults to `VWRP` |
 | `MARKET_DATA_API_KEY` | an Alpha Vantage key (free). Without it nothing is priced — see below |
+| `BENCHMARK_NAME` | optional. What the panel and alerts call the benchmark. Default `World index fund` |
 | `ALERT_NTFY_TOPIC` | optional. A long random topic name (20–64 letters, digits, `-`, `_`) for push alerts through ntfy.sh — see *Alerts* |
 | `RESEND_API_KEY`, `ALERT_EMAIL` | optional. Email alerts through Resend instead of push |
 

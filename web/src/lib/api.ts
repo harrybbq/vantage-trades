@@ -68,6 +68,7 @@ export interface ControlPanelView {
   ownership: OwnershipView;
   alerts: { channel: 'push' | 'email' | null };
   benchmarkSymbol: string;
+  benchmarkName: string;
 }
 
 export interface CurvePoint {

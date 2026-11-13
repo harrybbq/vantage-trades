@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ActivityItem, PerformancePoint, PerformanceSeries } from '../../lib/api';
 import { formatDay, formatDayShort, formatGBP, formatPp, dirOf } from '../../lib/format';
 import { band, leadVolatility, MIN_CHART_DAYS } from '../../lib/guidance';
+import { bench, benchLabel, benchShort } from '../../lib/benchmark';
 
 /**
  * Is it beating doing nothing? Three panels on one timeline:
  *
- *   1. return since the start (or £), with the same money in VWRP dashed and
+ *   1. return since the start (or £), with the same money in the benchmark dashed and
  *      the gap between them shaded ahead/behind
  *   2. the lead in pp, inside graded bands showing where luck alone would put it
  *   3. how far below its best-ever value it is
@@ -129,7 +130,7 @@ export function Performance({ series, color, events, focusDay }: Props) {
       <div className="empty">
         <b>Not enough data yet</b>
         {pts.length === 0
-          ? `${series.name} has no record to compare with VWRP yet. The first point appears after a nightly check with a VWRP price.`
+          ? `${series.name} has no record to compare with ${bench()} yet. The first point appears after a nightly check that has a price for it.`
           : `${pts.length} of ${MIN_CHART_DAYS} trading days so far. The chart appears at ${MIN_CHART_DAYS}; before that a line would invite reading a trend into a few days of noise.`}
       </div>
     );
@@ -252,7 +253,7 @@ export function Performance({ series, color, events, focusDay }: Props) {
       ? [{ y: Y1(A[lk]!), t: fmt1(A[lk]!), c: 'var(--text)' }]
       : [
           { y: Y1(A[lk]!), t: small ? fmt1(A[lk]!) : `${shortName} ${fmt1(A[lk]!)}`, c: 'var(--text)' },
-          ...(B[lk] != null ? [{ y: Y1(B[lk]!), t: `VWRP ${fmt1(B[lk]!)}`, c: 'var(--muted)' }] : []),
+          ...(B[lk] != null ? [{ y: Y1(B[lk]!), t: `${benchShort()} ${fmt1(B[lk]!)}`, c: 'var(--muted)' }] : []),
           ...(unit === 'gbp' && put[lk] != null ? [{ y: Y1(put[lk]!), t: `Put in £${Math.round(put[lk]!).toLocaleString('en-GB')}`, c: 'var(--mid)' }] : []),
         ];
   const gl = gap[lk] ?? 0;
@@ -328,7 +329,7 @@ export function Performance({ series, color, events, focusDay }: Props) {
         </span>
         <span className="i">
           <span className="k" style={{ borderColor: 'var(--bench)', borderTopStyle: 'dashed' }} />
-          VWRP <b>{p && ben[di] != null ? `${sgn(ben[di]!, '%', 2)} · ${formatGBP(p.shadowMinor)}` : '—'}</b>
+          {benchShort()} <b>{p && ben[di] != null ? `${sgn(ben[di]!, '%', 2)} · ${formatGBP(p.shadowMinor)}` : '—'}</b>
         </span>
         <span className="i">
           Lead <b className={dirOf(gap[di] ?? null)}>{gap[di] == null ? '—' : formatPp(gap[di]!)}</b>
@@ -350,7 +351,7 @@ export function Performance({ series, color, events, focusDay }: Props) {
           style={{ height: H }}
           tabIndex={0}
           role="img"
-          aria-label={`${series.name}: return, lead over VWRP and drawdown by trading day. Arrow keys step through days.`}
+          aria-label={`${series.name}: return, lead over ${bench()} and drawdown by trading day. Arrow keys step through days.`}
           onPointerMove={(e) => setHover(near(e.clientX))}
           onPointerLeave={() => setHover(null)}
           onBlur={() => setHover(null)}
@@ -396,7 +397,7 @@ export function Performance({ series, color, events, focusDay }: Props) {
 
           {/* Panel 2 */}
           <text className="panel-label" x={L} y={P2.y - 8}>
-            {small ? 'Lead over VWRP · grey = luck' : 'Lead over VWRP, pp · grey = where luck alone would put it'}
+            {small ? 'Lead over index · grey = luck' : `Lead over ${bench()}, pp · grey = where luck alone would put it`}
           </text>
           {(
             [
@@ -482,7 +483,7 @@ export function Performance({ series, color, events, focusDay }: Props) {
         </span>
         <span className="v-key">
           <i className="dash" style={{ borderColor: 'var(--bench)' }} />
-          VWRP, same money same days
+          {benchLabel()}, same money same days
         </span>
         {unit === 'gbp' && (
           <span className="v-key">
@@ -516,8 +517,8 @@ export function Performance({ series, color, events, focusDay }: Props) {
                 <th>Day</th>
                 <th>{series.name}</th>
                 <th>£</th>
-                <th>VWRP</th>
-                <th>VWRP £</th>
+                <th>{benchShort()}</th>
+                <th>{benchShort()} £</th>
                 <th>Lead</th>
                 <th>Below best</th>
               </tr>

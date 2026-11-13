@@ -41,6 +41,7 @@ export function view(over: Partial<ControlPanelView> = {}): ControlPanelView {
     ownership: { symbols: [], ledgerCashMinor: '0', brokerCashMinor: '0' },
     alerts: { channel: 'push' },
     benchmarkSymbol: 'VWRP',
+    benchmarkName: 'World index fund',
     ...over,
   };
 }

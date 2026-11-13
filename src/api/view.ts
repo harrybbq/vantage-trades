@@ -18,7 +18,7 @@ import { formatQty, parseQty } from '../money.js';
 import { PaperBroker } from '../broker/paper.js';
 import { usingPaperBroker } from '../broker/config.js';
 import { alertChannel } from '../alerts/notify.js';
-import { benchmarkSymbol } from '../ledger/snapshots.js';
+import { benchmarkName, benchmarkSymbol } from '../ledger/snapshots.js';
 
 export interface HoldingView {
   symbol: string;
@@ -116,6 +116,8 @@ export interface ControlPanelView {
   /** How the owner is told when something goes wrong. Null: they are not. */
   alerts: { channel: 'push' | 'email' | null };
   benchmarkSymbol: string;
+  /** The plain name the panel uses for the benchmark. */
+  benchmarkName: string;
   /**
    * Something the owner needs to read about the action that produced this
    * view — a kill that could not finish, say. Present only on the response
@@ -309,5 +311,6 @@ export async function controlPanelView(tx: Sql, asOf = new Date()): Promise<Cont
     ownership: await ownership(tx),
     alerts: { channel: alertChannel() },
     benchmarkSymbol: benchmarkSymbol().toUpperCase(),
+    benchmarkName: benchmarkName(),
   };
 }

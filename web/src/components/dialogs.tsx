@@ -3,6 +3,7 @@ import type { AgentView, KillPreview } from '../lib/api';
 import * as api from '../lib/api';
 import { formatGBP, formatQtyShort } from '../lib/format';
 import { capitalAdvice, limitsAdvice } from '../lib/guidance';
+import { bench, benchLabel, benchSymbol } from '../lib/benchmark';
 import { Modal } from './Modal';
 
 interface Common {
@@ -512,13 +513,13 @@ export function GlobalHaltDialog({
    Add agent
    ------------------------------------------------------------------------- */
 
-export function AddAgentDialog({ onClose, onDone, onError, benchmark = 'VWRP' }: Common & { benchmark?: string }) {
+export function AddAgentDialog({ onClose, onDone, onError }: Common) {
   const [kind, setKind] = useState<'hold' | 'sma'>('hold');
   const [name, setName] = useState('');
   const [id, setId] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const shownName = name.trim() || (kind === 'hold' ? `Hold ${benchmark}` : '');
+  const shownName = name.trim() || (kind === 'hold' ? benchLabel() : '');
   const suggestion = shownName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -556,9 +557,10 @@ export function AddAgentDialog({ onClose, onDone, onError, benchmark = 'VWRP' }:
         <label>
           <input type="radio" name="kind" checked={kind === 'hold'} onChange={() => setKind('hold')} />
           <span>
-            <b>Hold {benchmark}</b>
-            Buys the global index fund and keeps it. Makes no decisions. This is the result every
-            other agent has to beat, so it is the sensible place for most of the money.
+            <b>{benchLabel()}</b>
+            Buys one fund holding thousands of companies worldwide (its stock-market code is{' '}
+            {benchSymbol()}) and keeps it. Makes no decisions. This is the result every other agent
+            has to beat, so it is the sensible place for most of the money.
           </span>
         </label>
         <label>
@@ -566,7 +568,7 @@ export function AddAgentDialog({ onClose, onDone, onError, benchmark = 'VWRP' }:
           <span>
             <b>Moving-average rule</b>
             Buys a share when its price is above its 20-day average and sells when it falls below.
-            A simple test rule, not expected to beat {benchmark} after costs. Useful for proving the
+            A simple test rule, not expected to beat {bench()} after costs. Useful for proving the
             machinery with a small amount.
           </span>
         </label>
@@ -577,7 +579,7 @@ export function AddAgentDialog({ onClose, onDone, onError, benchmark = 'VWRP' }:
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={kind === 'hold' ? `Hold ${benchmark}` : 'Momentum'}
+          placeholder={kind === 'hold' ? benchLabel() : 'Momentum'}
           autoComplete="off"
         />
       </label>

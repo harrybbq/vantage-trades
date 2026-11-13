@@ -48,6 +48,13 @@ not just display numbers. In practice:
   tested on paper with positions, limits set). The switch stays locked until
   every line is ticked.
 
+- **The benchmark has a plain name on screen.** The owner did not recognise
+  "VWRP", so the panel and the alerts call it "World index fund" (one
+  setting, `BENCHMARK_NAME`; `web/src/lib/benchmark.ts` on the panel side).
+  The code VWRP appears only where the actual share is listed — holdings,
+  trades, the share list — and where the name is first explained. This file
+  and the code comments still say VWRP; on-screen text must not.
+
 What the guidance must never do: suggest which shares to buy or predict
 prices. It guides **process and risk** — sizing, when to judge, halt vs kill,
 what a number means — and measures the agents against VWRP. Stock-picking

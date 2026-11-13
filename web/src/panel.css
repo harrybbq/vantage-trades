@@ -347,3 +347,5 @@
 @media (max-width: 720px) {
   .vt table.owners th, .vt table.owners td { padding: 6px 4px; font-size: 12px; }
 }
+
+.vt table.holds td small.plain { color: var(--muted); font-family: var(--body); font-size: 10.5px; }

@@ -14,6 +14,7 @@ import { SignIn } from './components/SignIn';
 import { Performance } from './components/panel/Performance';
 import { Activity, AgentPanel, agentColors, AlertsCard, Banner, Coach, FundSummary, Glance, Ownership, PROBLEM_ORDER, ReadinessCard } from './components/panel/Sections';
 import { integrityOf, leadSummary, nextStep } from './lib/guidance';
+import { bench, benchSymbol, setBenchmark } from './lib/benchmark';
 import { authConfigured, currentSession, onAuthChange, signOut } from './lib/auth';
 import './panel.css';
 
@@ -196,6 +197,9 @@ function ControlPanel() {
     );
   }
 
+  // The benchmark's plain name, for every component below.
+  setBenchmark(view.benchmarkName, view.benchmarkSymbol);
+
   // Problems first, everywhere agents are listed.
   const live = view.agents.filter((a) => a.status !== 'killed').sort((a, b) => PROBLEM_ORDER[a.status] - PROBLEM_ORDER[b.status]);
   const killed = view.agents.filter((a) => a.status === 'killed');
@@ -289,7 +293,7 @@ function ControlPanel() {
 
         <div className="section-h" id="performance">
           <h2>Is it beating doing nothing?</h2>
-          <span className="sub">Each agent against the same money put into VWRP on the same days</span>
+          <span className="sub">Each agent against the same money put into {bench()} on the same days</span>
         </div>
         <section className="card">
           <div className="perf-controls">
@@ -310,17 +314,17 @@ function ControlPanel() {
             <Performance key={selected} series={chosenSeries} color={chosenColor} events={chosenEvents} focusDay={focusDay} />
           ) : (
             <div className="empty">
-              <b>Not enough data yet</b>This agent has no record to compare with VWRP yet.
+              <b>Not enough data yet</b>This agent has no record to compare with {bench()} yet.
             </div>
           )}
           <div className="explain">
-            <b>How to read this.</b> The top chart is the return since the start, with <b>VWRP</b> dashed. VWRP is one fund holding about 3,700 companies worldwide; buying it and doing nothing is the bar to beat. Switch to <b>£</b> to see real money, with a stepped line for the money put in. The middle chart is the gap between the two in <b>percentage points (pp)</b>: 5% against VWRP's 4% is 1 pp ahead. The bottom chart shows how far it has fallen below its <b>best-ever value</b>.
+            <b>How to read this.</b> The top chart is the return since the start, with <b>{bench()}</b> dashed. That is one fund holding about 3,700 companies worldwide (its stock-market code is {benchSymbol()}); buying it and doing nothing is the bar to beat. Switch to <b>£</b> to see real money, with a stepped line for the money put in. The middle chart is the gap between the two in <b>percentage points (pp)</b>: 5% against the fund's 4% is 1 pp ahead. The bottom chart shows how far it has fallen below its <b>best-ever value</b>.
           </div>
           <div className="explain">
             <b>The grey bands.</b> If the agent had no skill at all, its lead would stay inside the darkest band about half the time, inside the middle band 4 days in 5, and inside the whole grey area 19 days in 20. A lead inside the grey is what luck alone looks like. It widens over time because luck has longer to wander.
           </div>
           <div className="explain">
-            <b>% and £.</b> The % view ignores when money was added, so it shows how the agent's <b>choices</b> did, and is the fair comparison with VWRP. The £ view shows what the <b>money</b> actually did. The two can disagree, even about whether it made or lost money. There are no "per year" figures: under a year of record they mislead.
+            <b>% and £.</b> The % view ignores when money was added, so it shows how the agent's <b>choices</b> did, and is the fair comparison with {bench()}. The £ view shows what the <b>money</b> actually did. The two can disagree, even about whether it made or lost money. There are no "per year" figures: under a year of record they mislead.
           </div>
         </section>
 
@@ -421,7 +425,7 @@ function ControlPanel() {
         />
       )}
       {dialog?.kind === 'globalHalt' && <GlobalHaltDialog running={running} onClose={() => setDialog(null)} onDone={applyView} onError={setError} />}
-      {dialog?.kind === 'addAgent' && <AddAgentDialog benchmark={view.benchmarkSymbol} onClose={() => setDialog(null)} onDone={applyView} onError={setError} />}
+      {dialog?.kind === 'addAgent' && <AddAgentDialog onClose={() => setDialog(null)} onDone={applyView} onError={setError} />}
       {dialog?.kind === 'funds' && <FundsDialog poolMinor={view.unallocatedMinor} onClose={() => setDialog(null)} onDone={applyView} onError={setError} />}
     </div>
   );
